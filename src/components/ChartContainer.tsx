@@ -8,7 +8,8 @@ import { ChevronDown } from 'lucide-react';
 const TIMEFRAMES: Timeframe[] = ['1m', '5m', '15m', '30m', '1h', '1d', '1w', '1M'];
 
 interface Props {
-  apiKey: string;
+  geminiKey: string;
+  groqKey: string;
   activeTrade: Trade | null;
   onPriceUpdate: (price: number) => void;
   onSentimentUpdate: (score: number) => void;
@@ -16,7 +17,7 @@ interface Props {
   onError: (msg: string) => void;
 }
 
-export default function ChartContainer({ apiKey, activeTrade, onPriceUpdate, onSentimentUpdate, onTradeCreated, onError }: Props) {
+export default function ChartContainer({ geminiKey, groqKey, activeTrade, onPriceUpdate, onSentimentUpdate, onTradeCreated, onError }: Props) {
   const [data, setData] = useState<Kline[]>([]);
   const [timeframe, setTimeframe] = useState<Timeframe>('1m');
   const [isLoading, setIsLoading] = useState(true);
@@ -56,7 +57,7 @@ export default function ChartContainer({ apiKey, activeTrade, onPriceUpdate, onS
       }
     };
     fetchSR();
-  }, [apiKey, onError]);
+  }, [geminiKey, groqKey, onError]);
 
   // Handle active trade recording (Tick by Tick)
   useEffect(() => {

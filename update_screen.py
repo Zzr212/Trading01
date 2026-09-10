@@ -1,4 +1,9 @@
-import React, { useState } from 'react';
+import re
+
+with open('src/components/ApiKeyScreen.tsx', 'r') as f:
+    content = f.read()
+
+content = """import React, { useState } from 'react';
 import { KeyRound, ArrowRight, Zap } from 'lucide-react';
 
 interface Props {
@@ -106,3 +111,7 @@ export default function ApiKeyScreen({ onValidKey }: Props) {
     </div>
   );
 }
+"""
+
+with open('src/components/ApiKeyScreen.tsx', 'w') as f:
+    f.write(content)

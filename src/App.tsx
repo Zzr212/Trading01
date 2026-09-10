@@ -7,7 +7,8 @@ import { Trade, AppError } from './types';
 type TabType = 'ACTIVE' | 'HISTORY' | 'ERRORS';
 
 export default function App() {
-  const [apiKey, setApiKey] = useState<string>(localStorage.getItem('gemini_api_key') || '');
+  const [geminiKey, setGeminiKey] = useState<string>(localStorage.getItem('gemini_api_key') || '');
+  const [groqKey, setGroqKey] = useState<string>(localStorage.getItem('groq_api_key') || '');
   const [isKeyValid, setIsKeyValid] = useState<boolean>(false);
   const [trades, setTrades] = useState<Trade[]>([]);
   const [errors, setErrors] = useState<AppError[]>([]);
@@ -38,7 +39,9 @@ export default function App() {
       setTrades([]);
       setErrors([]);
       localStorage.removeItem('gemini_api_key');
-      setApiKey('');
+      localStorage.removeItem('groq_api_key');
+      setGeminiKey('');
+      setGroqKey('');
       setIsKeyValid(false);
       setActiveTab('ACTIVE');
     } catch (e: any) {
@@ -47,10 +50,13 @@ export default function App() {
   };
 
   useEffect(() => {
-    if (apiKey) {
+    if (geminiKey || groqKey) {
       fetch('/api/verify-key', {
         method: 'POST',
-        headers: { 'Authorization': `Bearer ${apiKey}` }
+        headers: { 
+          'x-gemini-key': geminiKey,
+          'x-groq-key': groqKey
+        }
       })
       .then(r => r.json())
       .then(d => {
@@ -59,17 +65,21 @@ export default function App() {
           fetchTrades();
         } else {
           localStorage.removeItem('gemini_api_key');
-          setApiKey('');
+          localStorage.removeItem('groq_api_key');
+          setGeminiKey('');
+          setGroqKey('');
           addError("API Key validation failed. Please re-enter.");
         }
       })
-      .catch(e => addError("Network error validating API key"));
+      .catch(e => addError("Network error validating API keys"));
     }
-  }, [apiKey, fetchTrades, addError]);
+  }, [geminiKey, groqKey, fetchTrades, addError]);
 
-  const handleValidKey = (key: string) => {
-    localStorage.setItem('gemini_api_key', key);
-    setApiKey(key);
+  const handleValidKey = (newGeminiKey: string, newGroqKey: string) => {
+    localStorage.setItem('gemini_api_key', newGeminiKey);
+    localStorage.setItem('groq_api_key', newGroqKey);
+    setGeminiKey(newGeminiKey);
+    setGroqKey(newGroqKey);
     setIsKeyValid(true);
     fetchTrades();
   };
@@ -115,7 +125,8 @@ export default function App() {
       {/* Top Half - Chart (Dynamically sized) */}
       <div className={`transition-all duration-500 ease-in-out ${isHistoryTab ? 'h-[40%]' : 'h-[70%]'} min-h-0 relative`}>
         <ChartContainer 
-          apiKey={apiKey}
+          geminiKey={geminiKey}
+          groqKey={groqKey}
           activeTrade={activeTrade}
           onPriceUpdate={setCurrentPrice}
           onSentimentUpdate={setSentimentScore}
