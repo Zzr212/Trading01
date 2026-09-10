@@ -5,9 +5,10 @@ interface ChartProps {
   data: Kline[];
   timeframe: string;
   activeTrade?: Trade | null;
+  isReplay?: boolean;
 }
 
-export default function CandlestickChart({ data, timeframe, activeTrade }: ChartProps) {
+export default function CandlestickChart({ data, timeframe, activeTrade, isReplay }: ChartProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [currentPrice, setCurrentPrice] = useState<number | null>(null);
@@ -15,8 +16,8 @@ export default function CandlestickChart({ data, timeframe, activeTrade }: Chart
   
   // High-performance state stored in refs to avoid re-renders during interactions
   const stateRef = useRef({
-    offset: 0, // Number of candles shifted from the right edge
-    zoom: 1, // Zoom level (multiplier for candle width)
+    offset: isReplay ? 0 : -20, // Negative offset allows space on the right side
+    zoom: 1,
     isDragging: false,
     lastX: 0,
     pinchDistance: 0,
@@ -52,9 +53,9 @@ export default function CandlestickChart({ data, timeframe, activeTrade }: Chart
     
     const maxVisibleCandles = Math.ceil(width / candleTotalWidth);
     
-    // Calculate visible range
-    const rightIndex = data.length - 1 - Math.floor(offset);
-    const leftIndex = Math.max(0, rightIndex - maxVisibleCandles - 1);
+    // Calculate visible range (allow offset to be negative to show blank space on right)
+    const rightIndex = Math.min(data.length - 1, data.length - 1 - Math.floor(offset));
+    const leftIndex = Math.max(0, rightIndex - maxVisibleCandles - Math.max(0, Math.ceil(-offset)));
     
     if (leftIndex > rightIndex) return;
     
@@ -87,19 +88,25 @@ export default function CandlestickChart({ data, timeframe, activeTrade }: Chart
       const tpY = getY(activeTrade.takeProfit);
       const slY = getY(activeTrade.stopLoss);
       
-      // Find X coordinate of the trade entry (roughly)
-      // Since we just have 'timestamp' we approximate or draw across the whole screen
-      // We'll draw across the whole visible screen for simplicity, from left to right
+      // Find X coordinate of the trade entry
+      const entryCandleIndex = data.findIndex(d => d.time >= activeTrade.timestamp);
       
+      let startX = 0;
+      if (entryCandleIndex !== -1) {
+        const distanceFromRightEdge = (data.length - 1 - entryCandleIndex) - offset;
+        startX = width - (distanceFromRightEdge * candleTotalWidth) - candleTotalWidth / 2;
+      }
+      
+      // Draw zones starting from startX extending to the right edge (plus extra space)
       ctx.globalAlpha = 0.15;
       
       // Profit Area (Green)
       ctx.fillStyle = '#22c55e';
-      ctx.fillRect(0, Math.min(entryY, tpY), width, Math.abs(entryY - tpY));
+      ctx.fillRect(startX, Math.min(entryY, tpY), width * 2, Math.abs(entryY - tpY));
       
       // Loss Area (Red)
       ctx.fillStyle = '#ef4444';
-      ctx.fillRect(0, Math.min(entryY, slY), width, Math.abs(entryY - slY));
+      ctx.fillRect(startX, Math.min(entryY, slY), width * 2, Math.abs(entryY - slY));
       
       ctx.globalAlpha = 1.0;
       
@@ -107,8 +114,8 @@ export default function CandlestickChart({ data, timeframe, activeTrade }: Chart
       ctx.strokeStyle = '#3b82f6';
       ctx.setLineDash([5, 5]);
       ctx.beginPath();
-      ctx.moveTo(0, entryY);
-      ctx.lineTo(width, entryY);
+      ctx.moveTo(startX, entryY);
+      ctx.lineTo(width * 2, entryY);
       ctx.stroke();
       
       ctx.setLineDash([]);
@@ -227,8 +234,14 @@ export default function CandlestickChart({ data, timeframe, activeTrade }: Chart
         setPriceChange(last.close >= data[data.length - 2].close ? 'up' : 'down');
       }
     }
+    
+    // Auto-scroll logic if we are near the right edge
+    if (!stateRef.current.isDragging && stateRef.current.offset < 5 && !isReplay) {
+      stateRef.current.offset = -20; // Keep blank space on the right
+    }
+    
     requestAnimationFrame(draw);
-  }, [data, draw]);
+  }, [data, draw, isReplay]);
 
   // Event Listeners for Interaction (Pan & Zoom)
   useEffect(() => {
@@ -247,7 +260,8 @@ export default function CandlestickChart({ data, timeframe, activeTrade }: Chart
         // Pan
         const candleTotalWidth = BASE_CANDLE_WIDTH * state.zoom;
         const shift = e.deltaX / candleTotalWidth;
-        state.offset = Math.max(0, Math.min(state.offset + shift, data.length - 1));
+        // Allow negative offset (blank space on right) up to -100 candles
+        state.offset = Math.max(-100, Math.min(state.offset + shift, data.length - 1));
       }
       requestAnimationFrame(draw);
     };
@@ -269,7 +283,7 @@ export default function CandlestickChart({ data, timeframe, activeTrade }: Chart
       const candleTotalWidth = BASE_CANDLE_WIDTH * state.zoom;
       const shift = deltaX / candleTotalWidth;
       
-      state.offset = Math.max(0, Math.min(state.offset + shift, data.length - 1));
+      state.offset = Math.max(-100, Math.min(state.offset + shift, data.length - 1));
       requestAnimationFrame(draw);
     };
 
@@ -345,7 +359,7 @@ export default function CandlestickChart({ data, timeframe, activeTrade }: Chart
           <div className="text-2xl font-light text-white font-mono flex items-center">
             ${currentPrice.toFixed(2)}
             <span className={`ml-2 text-sm ${priceChange === 'up' ? 'text-green-500' : 'text-red-500'}`}>
-              {priceChange === 'up' ? 'â²' : 'â¼'}
+              {priceChange === 'up' ? '▲' : '▼'}
             </span>
           </div>
         </div>

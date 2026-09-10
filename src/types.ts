@@ -7,6 +7,7 @@ export interface Kline {
   volume: number;
   ema9?: number;
   ema21?: number;
+  rsi?: number;
 }
 
 export type Timeframe = '1m' | '5m' | '15m' | '30m' | '1h' | '1d' | '1w' | '1M';
@@ -23,5 +24,16 @@ export interface Trade {
   status: TradeStatus;
   timestamp: number;
   confidence: number;
+}
+
+export interface AppError {
+  id: string;
+  message: string;
+  timestamp: number;
+}
+
+export interface SRLevels {
+  supports: number[];
+  resistances: number[];
 }
 

@@ -2,16 +2,20 @@ import React, { useState, useEffect, useCallback } from 'react';
 import ChartContainer from './components/ChartContainer';
 import TradePanel from './components/TradePanel';
 import ApiKeyScreen from './components/ApiKeyScreen';
-import { Trade } from './types';
+import { Trade, AppError } from './types';
 
 export default function App() {
   const [apiKey, setApiKey] = useState<string>(localStorage.getItem('gemini_api_key') || '');
   const [isKeyValid, setIsKeyValid] = useState<boolean>(false);
   const [trades, setTrades] = useState<Trade[]>([]);
+  const [errors, setErrors] = useState<AppError[]>([]);
   const [sentimentScore, setSentimentScore] = useState(50);
   const [currentPrice, setCurrentPrice] = useState(0);
 
-  // Load trades from backend
+  const addError = useCallback((msg: string) => {
+    setErrors(prev => [{ id: Date.now().toString(), message: msg, timestamp: Date.now() }, ...prev]);
+  }, []);
+
   const fetchTrades = useCallback(async () => {
     try {
       const res = await fetch('/api/trades');
@@ -19,14 +23,13 @@ export default function App() {
       if (Array.isArray(data)) {
         setTrades(data);
       }
-    } catch (e) {
-      console.error("Failed to fetch trades", e);
+    } catch (e: any) {
+      addError("Failed to fetch trades: " + e.message);
     }
-  }, []);
+  }, [addError]);
 
   useEffect(() => {
     if (apiKey) {
-      // Background verification of saved key
       fetch('/api/verify-key', {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${apiKey}` }
@@ -39,11 +42,12 @@ export default function App() {
         } else {
           localStorage.removeItem('gemini_api_key');
           setApiKey('');
+          addError("API Key validation failed. Please re-enter.");
         }
       })
-      .catch(console.error);
+      .catch(e => addError("Network error validating API key"));
     }
-  }, [apiKey, fetchTrades]);
+  }, [apiKey, fetchTrades, addError]);
 
   const handleValidKey = (key: string) => {
     localStorage.setItem('gemini_api_key', key);
@@ -75,9 +79,9 @@ export default function App() {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status: result })
-      }).catch(console.error);
+      }).catch(e => addError("Failed to update trade status: " + e.message));
     }
-  }, [currentPrice, trades]);
+  }, [currentPrice, trades, addError]);
 
   if (!isKeyValid) {
     return <ApiKeyScreen onValidKey={handleValidKey} />;
@@ -88,23 +92,26 @@ export default function App() {
 
   return (
     <div className="h-[100dvh] w-full flex flex-col bg-neutral-950 font-sans selection:bg-blue-500/30">
-      {/* Top Half - Chart */}
-      <div className="flex-1 min-h-0 relative">
+      {/* Top Half - Chart (75%) */}
+      <div className="h-[70%] min-h-0 relative">
         <ChartContainer 
           apiKey={apiKey}
           activeTrade={activeTrade}
           onPriceUpdate={setCurrentPrice}
           onSentimentUpdate={setSentimentScore}
           onTradeCreated={(t) => setTrades(prev => [t, ...prev])}
+          onError={addError}
         />
       </div>
       
-      {/* Bottom Half - AI Suggestions & History */}
-      <div className="flex-1 min-h-0 border-t-2 border-neutral-900 shadow-[0_-8px_30px_rgba(0,0,0,0.5)] z-10 relative">
+      {/* Bottom Half - AI Suggestions & History (30%) */}
+      <div className="h-[30%] min-h-0 border-t-2 border-neutral-900 shadow-[0_-8px_30px_rgba(0,0,0,0.5)] z-10 relative">
         <TradePanel 
           activeTrade={activeTrade} 
           history={historyTrades}
           sentimentScore={sentimentScore}
+          errors={errors}
+          onClearErrors={() => setErrors([])}
         />
       </div>
     </div>

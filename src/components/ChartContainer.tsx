@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Kline, Timeframe, Trade } from '../types';
+import { Kline, Timeframe, Trade, SRLevels } from '../types';
 import { fetchHistoricalKlines } from '../lib/binance';
 import { calculateEMA, calculateRSI } from '../lib/indicators';
 import CandlestickChart from './CandlestickChart';
@@ -13,142 +13,101 @@ interface Props {
   onPriceUpdate: (price: number) => void;
   onSentimentUpdate: (score: number) => void;
   onTradeCreated: (trade: Trade) => void;
+  onError: (msg: string) => void;
 }
 
-export default function ChartContainer({ apiKey, activeTrade, onPriceUpdate, onSentimentUpdate, onTradeCreated }: Props) {
+export default function ChartContainer({ apiKey, activeTrade, onPriceUpdate, onSentimentUpdate, onTradeCreated, onError }: Props) {
   const [data, setData] = useState<Kline[]>([]);
   const [timeframe, setTimeframe] = useState<Timeframe>('1m');
   const [isLoading, setIsLoading] = useState(true);
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
-  
+  const [srLevels, setSrLevels] = useState<SRLevels | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const analyzingRef = useRef(false);
+  const recordedCandlesRef = useRef<Kline[]>([]);
 
-  // Derive indicators whenever data changes
-  const enrichedData = React.useMemo(() => {
-    if (data.length === 0) return [];
-    const ema9 = calculateEMA(data, 9);
-    const ema21 = calculateEMA(data, 21);
-    const rsiArray = calculateRSI(data, 14);
-
-    return data.map((d, i) => ({
-      ...d,
-      ema9: ema9[i],
-      ema21: ema21[i],
-      rsi: rsiArray[i]
-    }));
-  }, [data]);
-
-  // Handle AI Trigger Logic
+  // Initial Multi-Timeframe S/R Analysis
   useEffect(() => {
-    if (enrichedData.length < 21) return;
-    const current = enrichedData[enrichedData.length - 1];
-    const prev = enrichedData[enrichedData.length - 2];
-    
-    onPriceUpdate(current.close);
-
-    // Calculate overall sentiment (0-100)
-    let score = 50;
-    if (current.ema9 && current.ema21) {
-      if (current.ema9 > current.ema21) score += 20;
-      else score -= 20;
-    }
-    if (current.rsi) {
-      if (current.rsi > 50) score += (current.rsi - 50); // max +50
-      else score -= (50 - current.rsi); // max -50
-    }
-    onSentimentUpdate(Math.max(0, Math.min(100, score)));
-
-    // Do not trigger a new trade if one is active or we are already analyzing
-    if (activeTrade || analyzingRef.current) return;
-
-    // Check for Crossover Signals (Trigger)
-    let signalType: 'LONG' | 'SHORT' | null = null;
-    
-    if (current.ema9 && current.ema21 && prev.ema9 && prev.ema21) {
-      // Golden Cross (LONG)
-      if (prev.ema9 <= prev.ema21 && current.ema9 > current.ema21 && current.rsi && current.rsi < 60) {
-        signalType = 'LONG';
-      }
-      // Death Cross (SHORT)
-      else if (prev.ema9 >= prev.ema21 && current.ema9 < current.ema21 && current.rsi && current.rsi > 40) {
-        signalType = 'SHORT';
-      }
-    }
-
-    if (signalType) {
-      analyzingRef.current = true;
-      const recentCandles = enrichedData.slice(-5).map(c => ({
-        close: c.close, volume: c.volume, ema9: c.ema9, ema21: c.ema21, rsi: c.rsi
-      }));
-
-      fetch('/api/analyze', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${apiKey}`
-        },
-        body: JSON.stringify({
-          type: signalType,
-          currentPrice: current.close,
-          ema9: current.ema9,
-          ema21: current.ema21,
-          rsi: current.rsi,
-          recentCandles
-        })
-      })
-      .then(r => r.json())
-      .then(res => {
-        if (res.trade && res.entryPrice && res.takeProfit && res.stopLoss) {
-          const newTrade: Trade = {
-            id: Date.now().toString(),
-            pair: 'BTC/USDT',
-            type: res.type,
-            entryPrice: res.entryPrice,
-            takeProfit: res.takeProfit,
-            stopLoss: res.stopLoss,
-            status: 'ACTIVE',
-            timestamp: Date.now(),
-            confidence: res.confidence || 80
-          };
-          
-          // Save to DB
-          fetch('/api/trades', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(newTrade)
-          }).then(() => {
-            onTradeCreated(newTrade);
-          }).catch(console.error);
+    if (!apiKey) return;
+    const fetchSR = async () => {
+      try {
+        // Fetch shorter timeframes suitable for scalping
+        const [tf1h, tf15m, tf5m] = await Promise.all([
+          fetchHistoricalKlines('BTCUSDT', '1h', 30),
+          fetchHistoricalKlines('BTCUSDT', '15m', 30),
+          fetchHistoricalKlines('BTCUSDT', '5m', 30)
+        ]);
+        
+        const res = await fetch('/api/analyze-sr', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${apiKey}`
+          },
+          body: JSON.stringify({ tf1h, tf15m, tf5m })
+        });
+        
+        const data = await res.json();
+        if (data.supports && data.resistances) {
+          setSrLevels(data);
         }
-      })
-      .catch(console.error)
-      .finally(() => {
-        analyzingRef.current = false;
-      });
-    }
-  }, [enrichedData, activeTrade, apiKey, onPriceUpdate, onSentimentUpdate, onTradeCreated]);
+      } catch (err: any) {
+        onError("Failed to fetch initial AI S/R levels: " + err.message);
+      }
+    };
+    fetchSR();
+  }, [apiKey, onError]);
 
+  // Handle active trade recording
+  useEffect(() => {
+    if (activeTrade && data.length > 0) {
+      // Append latest candle to recording buffer if we are in an active trade
+      const current = data[data.length - 1];
+      if (recordedCandlesRef.current.length === 0 || recordedCandlesRef.current[recordedCandlesRef.current.length - 1].time !== current.time) {
+        recordedCandlesRef.current.push(current);
+      }
+    } else if (!activeTrade && recordedCandlesRef.current.length > 0) {
+      // Trade just ended, upload recording to server
+      const tradeIdToSave = recordedCandlesRef.current[0].time.toString(); // Just need a way to pass ID, but wait, the trade ID isn't directly here unless we save it.
+      // Better: we can look up the ID from the last known active trade. We should store it in a ref.
+    }
+  }, [data, activeTrade]);
+
+  const lastActiveTradeIdRef = useRef<string | null>(null);
+  
+  useEffect(() => {
+    if (activeTrade) {
+      lastActiveTradeIdRef.current = activeTrade.id;
+    } else if (lastActiveTradeIdRef.current && recordedCandlesRef.current.length > 0) {
+      // Trade just ended! Let's save the review data.
+      fetch('/api/reviews', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          tradeId: lastActiveTradeIdRef.current,
+          candles: recordedCandlesRef.current
+        })
+      }).catch(e => onError("Failed to save trade review: " + e.message));
+      
+      lastActiveTradeIdRef.current = null;
+      recordedCandlesRef.current = []; // Clear for next trade
+    }
+  }, [activeTrade, onError]);
 
   useEffect(() => {
     let isMounted = true;
     setIsLoading(true);
-    setData([]); // Clear old data on timeframe switch
+    setData([]);
     
-    // Close existing WebSocket
-    if (wsRef.current) {
-      wsRef.current.close();
-    }
+    if (wsRef.current) wsRef.current.close();
 
     const loadData = async () => {
       try {
-        // 1. Fetch the latest 1000 candles instantly
         const initialData = await fetchHistoricalKlines('BTCUSDT', timeframe, 1000);
         if (!isMounted) return;
         setData(initialData);
         setIsLoading(false);
 
-        // 2. Setup real-time WebSocket for current timeframe
         const wsUrl = `wss://stream.binance.com:9443/ws/btcusdt@kline_${timeframe}`;
         const ws = new WebSocket(wsUrl);
         wsRef.current = ws;
@@ -171,10 +130,8 @@ export default function ChartContainer({ apiKey, activeTrade, onPriceUpdate, onS
               const lastKline = prevData[prevData.length - 1];
               
               if (lastKline.time === newKline.time) {
-                // Update current candle
                 return [...prevData.slice(0, -1), newKline];
               } else if (newKline.time > lastKline.time) {
-                // Append new candle only if it's newer
                 return [...prevData, newKline];
               }
               return prevData;
@@ -182,8 +139,6 @@ export default function ChartContainer({ apiKey, activeTrade, onPriceUpdate, onS
           }
         };
 
-        // 3. Background fetch older data (up to ~10,000 candles as requested)
-        // We fetch 9 more pages of 1000
         let currentEarliest = initialData[0]?.time;
         if (!currentEarliest) return;
 
@@ -196,22 +151,19 @@ export default function ChartContainer({ apiKey, activeTrade, onPriceUpdate, onS
               currentEarliest = more[0].time;
               setData(prev => {
                 if (!prev || prev.length === 0) return more;
-                // Merge without duplicates at boundaries
                 const filteredMore = more.filter(m => m.time < prev[0].time);
                 return [...filteredMore, ...prev];
               });
-            } catch (err) {
-              console.warn('Background fetch interrupted', err);
-              break; // Stop fetching on error/rate limit
+            } catch (err: any) {
+              onError("Background fetch interrupted: " + err.message);
+              break;
             }
           }
         };
         
-        // Delay background fetch slightly to keep UI thread smooth during initial render
         setTimeout(fetchMore, 1000);
-
-      } catch (err) {
-        console.error('Failed to load chart data', err);
+      } catch (err: any) {
+        onError('Failed to load chart data: ' + err.message);
         if (isMounted) setIsLoading(false);
       }
     };
@@ -220,15 +172,118 @@ export default function ChartContainer({ apiKey, activeTrade, onPriceUpdate, onS
 
     return () => {
       isMounted = false;
-      if (wsRef.current) {
-        wsRef.current.close();
-      }
+      if (wsRef.current) wsRef.current.close();
     };
-  }, [timeframe]);
+  }, [timeframe, onError]);
+
+  const enrichedData = React.useMemo(() => {
+    if (data.length === 0) return [];
+    const ema9 = calculateEMA(data, 9);
+    const ema21 = calculateEMA(data, 21);
+    const rsiArray = calculateRSI(data, 14);
+
+    return data.map((d, i) => ({
+      ...d,
+      ema9: ema9[i],
+      ema21: ema21[i],
+      rsi: rsiArray[i]
+    }));
+  }, [data]);
+
+  useEffect(() => {
+    if (enrichedData.length < 21) return;
+    const current = enrichedData[enrichedData.length - 1];
+    const prev = enrichedData[enrichedData.length - 2];
+    
+    onPriceUpdate(current.close);
+
+    let score = 50;
+    if (current.ema9 && current.ema21) {
+      if (current.ema9 > current.ema21) score += 20;
+      else score -= 20;
+    }
+    if (current.rsi) {
+      if (current.rsi > 50) score += (current.rsi - 50);
+      else score -= (50 - current.rsi);
+    }
+    onSentimentUpdate(Math.max(0, Math.min(100, score)));
+
+    if (activeTrade || analyzingRef.current || !srLevels) return;
+
+    // Strict trigger for scalping: Price must be very close to a key support or resistance level (0.2% tolerance)
+    const isNearSupport = srLevels.supports.some(level => Math.abs(current.close - level) / level < 0.002);
+    const isNearResistance = srLevels.resistances.some(level => Math.abs(current.close - level) / level < 0.002);
+    
+    if (!isNearSupport && !isNearResistance) return; // Stricter logic!
+
+    let signalType: 'LONG' | 'SHORT' | null = null;
+    
+    if (current.ema9 && current.ema21 && prev.ema9 && prev.ema21) {
+      if (prev.ema9 <= prev.ema21 && current.ema9 > current.ema21 && current.rsi && current.rsi < 60 && isNearSupport) {
+        signalType = 'LONG';
+      }
+      else if (prev.ema9 >= prev.ema21 && current.ema9 < current.ema21 && current.rsi && current.rsi > 40 && isNearResistance) {
+        signalType = 'SHORT';
+      }
+    }
+
+    if (signalType) {
+      analyzingRef.current = true;
+      const recentCandles = enrichedData.slice(-5).map(c => ({
+        close: c.close, volume: c.volume, ema9: c.ema9, ema21: c.ema21, rsi: c.rsi
+      }));
+
+      fetch('/api/analyze', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${apiKey}`
+        },
+        body: JSON.stringify({
+          type: signalType,
+          currentPrice: current.close,
+          ema9: current.ema9,
+          ema21: current.ema21,
+          rsi: current.rsi,
+          srLevels,
+          recentCandles
+        })
+      })
+      .then(r => r.json())
+      .then(res => {
+        if (res.trade && res.entryPrice && res.takeProfit && res.stopLoss) {
+          const newTrade: Trade = {
+            id: Date.now().toString(),
+            pair: 'BTC/USDT',
+            type: res.type,
+            entryPrice: res.entryPrice,
+            takeProfit: res.takeProfit,
+            stopLoss: res.stopLoss,
+            status: 'ACTIVE',
+            timestamp: Date.now(),
+            confidence: res.confidence || 80
+          };
+          
+          fetch('/api/trades', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(newTrade)
+          }).then(() => {
+            onTradeCreated(newTrade);
+            // Pre-seed recording with context candles
+            recordedCandlesRef.current = enrichedData.slice(-50);
+          }).catch(e => onError("Failed to save trade: " + e.message));
+        }
+      })
+      .catch(e => onError("AI Analysis Error: " + e.message))
+      .finally(() => {
+        analyzingRef.current = false;
+      });
+    }
+  }, [enrichedData, activeTrade, apiKey, srLevels, onPriceUpdate, onSentimentUpdate, onTradeCreated, onError]);
 
   return (
     <div className="w-full h-full flex flex-col border-b border-neutral-900 bg-neutral-950">
-      {/* Timeframe Dropdown */}
       <div className="absolute top-4 right-4 z-20">
         <button
           onClick={() => setIsDropdownOpen(!isDropdownOpen)}
