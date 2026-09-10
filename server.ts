@@ -51,7 +51,7 @@ async function callAIWithFallback(geminiKey: string | undefined, groqKey: string
           "Content-Type": "application/json"
         },
         body: JSON.stringify({
-          model: "llama-3.1-70b-versatile",
+          model: "llama-3.3-70b-versatile",
           messages: [{ role: "user", content: prompt }],
           response_format: isJson ? { type: "json_object" } : undefined
         })
@@ -248,7 +248,7 @@ async function startServer() {
   } else {
     const distPath = path.join(process.cwd(), "dist");
     app.use(express.static(distPath));
-    app.get("*", (req, res) => {
+    app.get("*all", (req, res) => {
       res.sendFile(path.join(distPath, "index.html"));
     });
   }
