@@ -4,9 +4,7 @@ import { fetchHistoricalKlines } from '../lib/binance';
 import { calculateEMA, calculateRSI } from '../lib/indicators';
 import CandlestickChart from './CandlestickChart';
 import { ChevronDown } from 'lucide-react';
-
 const TIMEFRAMES: Timeframe[] = ['1m', '5m', '15m', '30m', '1h', '1d', '1w', '1M'];
-
 interface Props {
   geminiKey: string;
   groqKey: string;
@@ -16,9 +14,20 @@ interface Props {
   onTradeCreated: (trade: Trade) => void;
   onError: (msg: string) => void;
 }
-
 export default function ChartContainer({ geminiKey, groqKey, activeTrade, onPriceUpdate, onSentimentUpdate, onTradeCreated, onError }: Props) {
   const [data, setData] = useState<Kline[]>([]);
+  const enrichedData = React.useMemo(() => {
+    if (data.length === 0) return [];
+    const ema9 = calculateEMA(data, 9);
+    const ema21 = calculateEMA(data, 21);
+    const rsiArray = calculateRSI(data, 14);
+    return data.map((d, i) => ({
+      ...d,
+      ema9: ema9[i],
+      ema21: ema21[i],
+      rsi: rsiArray[i]
+    }));
+  }, [data]);
   const [timeframe, setTimeframe] = useState<Timeframe>('1m');
   const [isLoading, setIsLoading] = useState(true);
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
@@ -178,19 +187,6 @@ export default function ChartContainer({ geminiKey, groqKey, activeTrade, onPric
     };
   }, [timeframe, onError]);
 
-  const enrichedData = React.useMemo(() => {
-    if (data.length === 0) return [];
-    const ema9 = calculateEMA(data, 9);
-    const ema21 = calculateEMA(data, 21);
-    const rsiArray = calculateRSI(data, 14);
-
-    return data.map((d, i) => ({
-      ...d,
-      ema9: ema9[i],
-      ema21: ema21[i],
-      rsi: rsiArray[i]
-    }));
-  }, [data]);
 
   useEffect(() => {
     if (enrichedData.length < 21) return;
