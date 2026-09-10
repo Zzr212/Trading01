@@ -23,28 +23,6 @@ db.exec(`CREATE TABLE IF NOT EXISTS trade_reviews (
   candles TEXT
 )`);
 
-// Fallback logic for Gemini to avoid rate limits or outages
-async function callGeminiWithFallback(ai: GoogleGenAI, prompt: string, isJson = true) {
-  const models = ["gemini-2.5-pro", "gemini-2.5-flash", "gemini-2.0-flash"];
-  let lastError: any = null;
-  
-  for (const model of models) {
-    try {
-      const response = await ai.models.generateContent({
-        model: model,
-        contents: prompt,
-        config: isJson ? { responseMimeType: "application/json" } : undefined
-      });
-      return response.text;
-    } catch (e: any) {
-      console.warn(`Model ${model} failed: ${e.message}. Trying next...`);
-      lastError = e;
-    }
-  }
-  
-  throw new Error(`All models failed. Last error: ${lastError?.message}`);
-}
-
 async function startServer() {
   const app = express();
   const PORT = 3000;
@@ -134,7 +112,10 @@ async function startServer() {
     if (!apiKey) return res.status(401).json({ error: "No key" });
     try {
       const ai = new GoogleGenAI({ apiKey });
-      await callGeminiWithFallback(ai, "Respond with exactly 'ok'.", false);
+      await ai.models.generateContent({
+        model: "gemini-2.5-flash",
+        contents: "Respond with exactly 'ok'."
+      });
       res.json({ valid: true });
     } catch (e: any) {
       res.status(400).json({ valid: false, error: e.message || "Invalid key" });
@@ -163,8 +144,13 @@ async function startServer() {
         "resistances": [price1, price2, price3]
       }`;
 
-      const responseText = await callGeminiWithFallback(ai, prompt, true);
-      let result = JSON.parse(responseText || '{}');
+      const response = await ai.models.generateContent({
+        model: "gemini-2.5-flash",
+        contents: prompt,
+        config: { responseMimeType: "application/json" }
+      });
+      
+      let result = JSON.parse(response.text || '{}');
       res.json(result);
     } catch (e: any) {
       console.error(e);
@@ -203,8 +189,15 @@ async function startServer() {
       }
       Reply ONLY in valid JSON.`;
 
-      const responseText = await callGeminiWithFallback(ai, prompt, true);
-      let result = JSON.parse(responseText || '{}');
+      const response = await ai.models.generateContent({
+        model: "gemini-2.5-flash",
+        contents: prompt,
+        config: {
+          responseMimeType: "application/json",
+        }
+      });
+      
+      let result = JSON.parse(response.text || '{}');
       res.json(result);
     } catch (e: any) {
       console.error(e);
