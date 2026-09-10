@@ -25,47 +25,54 @@ db.exec(`CREATE TABLE IF NOT EXISTS trade_reviews (
 
 
 async function callAIWithFallback(geminiKey: string | undefined, groqKey: string | undefined, prompt: string, isJson = true) {
-  let lastError = null;
+  let errors: string[] = [];
   
+  const geminiModels = ["gemini-2.5-flash", "gemini-2.5-pro"];
+  const groqModels = ["llama-3.3-70b-versatile", "llama3-8b-8192", "mixtral-8x7b-32768"];
+
   if (geminiKey) {
-    try {
-      const ai = new GoogleGenAI({ apiKey: geminiKey });
-      const response = await ai.models.generateContent({
-        model: "gemini-2.5-flash",
-        contents: prompt,
-        config: isJson ? { responseMimeType: "application/json" } : undefined
-      });
-      return response.text;
-    } catch (e: any) {
-      console.warn(`Gemini failed: ${e.message}. Trying fallback...`);
-      lastError = e;
+    const ai = new GoogleGenAI({ apiKey: geminiKey });
+    for (const model of geminiModels) {
+      try {
+        const response = await ai.models.generateContent({
+          model: model,
+          contents: prompt,
+          config: isJson ? { responseMimeType: "application/json" } : undefined
+        });
+        return { text: response.text, provider: 'Gemini', model };
+      } catch (e: any) {
+        console.warn(`Gemini (${model}) failed: ${e.message}`);
+        errors.push(`Gemini ${model}: ${e.message}`);
+      }
     }
   }
 
   if (groqKey) {
-    try {
-      const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-        method: "POST",
-        headers: {
-          "Authorization": `Bearer ${groqKey}`,
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-          model: "llama-3.3-70b-versatile",
-          messages: [{ role: "user", content: prompt }],
-          response_format: isJson ? { type: "json_object" } : undefined
-        })
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error?.message || "Groq API Error");
-      return data.choices[0].message.content;
-    } catch (e: any) {
-      console.warn(`Groq failed: ${e.message}.`);
-      lastError = e;
+    for (const model of groqModels) {
+      try {
+        const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+          method: "POST",
+          headers: {
+            "Authorization": `Bearer ${groqKey}`,
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            model: model,
+            messages: [{ role: "user", content: prompt }],
+            response_format: isJson ? { type: "json_object" } : undefined
+          })
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error?.message || "Groq API Error");
+        return { text: data.choices[0].message.content, provider: 'Groq', model };
+      } catch (e: any) {
+        console.warn(`Groq (${model}) failed: ${e.message}`);
+        errors.push(`Groq ${model}: ${e.message}`);
+      }
     }
   }
   
-  throw new Error(`All AI providers failed. Last error: ${lastError?.message || 'No valid API keys provided.'}`);
+  throw new Error(`All models failed.\nAttempts:\n${errors.join('\n')}`);
 }
 
 async function startServer() {
@@ -159,10 +166,10 @@ async function startServer() {
     if (!geminiKey && !groqKey) return res.status(401).json({ error: "No keys provided" });
     
     try {
-      await callAIWithFallback(geminiKey, groqKey, "Respond with exactly 'ok'.", false);
-      res.json({ valid: true });
+      const { provider, model } = await callAIWithFallback(geminiKey, groqKey, "Respond with exactly 'ok'.", false);
+      res.json({ valid: true, provider, model });
     } catch (e: any) {
-      res.status(400).json({ valid: false, error: e.message || "Invalid keys or Quota exceeded." });
+      res.status(400).json({ valid: false, error: e.message });
     }
   });
 
@@ -188,7 +195,7 @@ async function startServer() {
         "resistances": [price1, price2, price3]
       }`;
 
-      const text = await callAIWithFallback(geminiKey, groqKey, prompt, true);
+      const { text } = await callAIWithFallback(geminiKey, groqKey, prompt, true);
       let result = JSON.parse(text || '{}');
       res.json(result);
     } catch (e: any) {
@@ -229,7 +236,7 @@ async function startServer() {
       }
       Reply ONLY in valid JSON.`;
 
-      const text = await callAIWithFallback(geminiKey, groqKey, prompt, true);
+      const { text } = await callAIWithFallback(geminiKey, groqKey, prompt, true);
       let result = JSON.parse(text || '{}');
       res.json(result);
     } catch (e: any) {

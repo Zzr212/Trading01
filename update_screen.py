@@ -3,39 +3,47 @@ import re
 with open('src/components/ApiKeyScreen.tsx', 'r') as f:
     content = f.read()
 
-content = """import React, { useState } from 'react';
-import { KeyRound, ArrowRight, Zap } from 'lucide-react';
+# Add states for status
+imports = "import React, { useState, useEffect } from 'react';"
+content = content.replace("import React, { useState } from 'react';", imports)
 
-interface Props {
-  onValidKey: (geminiKey: string, groqKey: string) => void;
-}
-
-export default function ApiKeyScreen({ onValidKey }: Props) {
-  const [geminiKey, setGeminiKey] = useState('');
-  const [groqKey, setGroqKey] = useState('');
-  const [isLoading, setIsLoading] = useState(false);
+new_states = """  const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
+  const [statusLog, setStatusLog] = useState<string>('');
+  const [successMsg, setSuccessMsg] = useState('');"""
+content = content.replace("  const [isLoading, setIsLoading] = useState(false);\n  const [error, setError] = useState('');", new_states)
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!geminiKey.trim() && !groqKey.trim()) {
-      setError("Please provide at least one API key");
-      return;
+# Add fake progress effect
+effect = """
+  useEffect(() => {
+    let interval: any;
+    if (isLoading) {
+      const statuses = [
+        "Connecting to AI Providers...",
+        "Testing Gemini-2.5-Flash...",
+        "Testing Gemini-2.5-Pro...",
+        "Testing Groq Llama-3.3-70B...",
+        "Testing Groq Llama-8B...",
+        "Verifying capabilities..."
+      ];
+      let i = 0;
+      setStatusLog(statuses[0]);
+      interval = setInterval(() => {
+        i++;
+        if (i < statuses.length) setStatusLog(statuses[i]);
+      }, 800);
+    } else {
+      setStatusLog('');
     }
-    
-    setIsLoading(true);
-    setError('');
-    
-    try {
-      const res = await fetch('/api/verify-key', {
-        method: 'POST',
-        headers: { 
-          'x-gemini-key': geminiKey.trim(),
-          'x-groq-key': groqKey.trim()
-        }
-      });
-      
-      const data = await res.json();
+    return () => clearInterval(interval);
+  }, [isLoading]);
+"""
+
+# Find handleSubmit to insert effect before it
+content = content.replace("  const handleSubmit = async (e: React.FormEvent) => {", effect + "\n  const handleSubmit = async (e: React.FormEvent) => {")
+
+# Update handleSubmit
+old_submit = """      const data = await res.json();
       if (data.valid) {
         onValidKey(geminiKey.trim(), groqKey.trim());
       } else {
@@ -46,72 +54,51 @@ export default function ApiKeyScreen({ onValidKey }: Props) {
     } finally {
       setIsLoading(false);
     }
-  };
+  };"""
 
-  return (
-    <div className="min-h-screen bg-neutral-950 flex flex-col items-center justify-center p-4">
-      <div className="max-w-md w-full bg-neutral-900 border border-neutral-800 rounded-2xl p-8 flex flex-col gap-6 shadow-2xl">
-        <div className="w-12 h-12 bg-blue-500/10 rounded-xl flex items-center justify-center text-blue-500 mb-2">
-          <KeyRound size={24} />
-        </div>
-        
-        <div>
-          <h1 className="text-2xl font-bold text-white mb-2">Welcome to AI Trader</h1>
-          <p className="text-neutral-400 text-sm">
-            Enter your API keys to enable the AI technical analysis agent. We recommend providing a Groq key as a fallback in case you hit Gemini rate limits.
-          </p>
-        </div>
+new_submit = """      const data = await res.json();
+      if (data.valid) {
+        setSuccessMsg(`Connected successfully via ${data.provider} (${data.model})`);
+        setTimeout(() => {
+          onValidKey(geminiKey.trim(), groqKey.trim());
+        }, 1500);
+      } else {
+        setError(data.error || 'Invalid API Keys. Please check your inputs.');
+      }
+    } catch (err) {
+      setError('Failed to verify keys. Is the server running?');
+    } finally {
+      setIsLoading(false);
+    }
+  };"""
+content = content.replace(old_submit, new_submit)
 
-        <form onSubmit={handleSubmit} className="flex flex-col gap-5">
-          {/* Gemini Key */}
-          <div className="flex flex-col gap-1.5">
-            <label className="text-xs font-semibold text-neutral-500 uppercase tracking-wider flex justify-between">
-              <span>Google Gemini Key</span>
-              <span className="text-blue-500 font-normal">Primary</span>
-            </label>
-            <input
-              type="password"
-              value={geminiKey}
-              onChange={(e) => setGeminiKey(e.target.value)}
-              placeholder="AIzaSy..."
-              className="w-full bg-neutral-950 border border-neutral-800 rounded-lg px-4 py-3 text-neutral-200 outline-none focus:border-blue-500 transition-colors"
-            />
-          </div>
-
-          {/* Groq Key */}
-          <div className="flex flex-col gap-1.5">
-            <label className="text-xs font-semibold text-neutral-500 uppercase tracking-wider flex justify-between items-center">
-              <span className="flex items-center gap-1.5"><Zap size={12} className="text-amber-500"/> Groq API Key</span>
-              <span className="text-amber-500 font-normal">Fallback (Free)</span>
-            </label>
-            <p className="text-[10px] text-neutral-500 leading-tight">Get a fast, free key at <a href="https://console.groq.com/" target="_blank" rel="noreferrer" className="text-blue-500 underline">console.groq.com</a> if you hit quota limits.</p>
-            <input
-              type="password"
-              value={groqKey}
-              onChange={(e) => setGroqKey(e.target.value)}
-              placeholder="gsk_..."
-              className="w-full bg-neutral-950 border border-neutral-800 rounded-lg px-4 py-3 text-neutral-200 outline-none focus:border-amber-500 transition-colors"
-            />
-          </div>
-          
-          {error && (
+# Update UI to show status
+old_error = """          {error && (
             <p className="text-red-500 text-sm bg-red-500/10 px-3 py-2 rounded-lg">{error}</p>
+          )}"""
+
+new_error = """          {isLoading && (
+            <div className="bg-blue-500/10 border border-blue-500/20 px-4 py-3 rounded-lg flex items-center gap-3">
+              <div className="w-4 h-4 rounded-full border-2 border-blue-500 border-t-transparent animate-spin" />
+              <p className="text-blue-400 text-sm font-medium">{statusLog}</p>
+            </div>
+          )}
+          
+          {successMsg && !isLoading && (
+            <div className="bg-green-500/10 border border-green-500/20 px-4 py-3 rounded-lg flex items-center gap-3">
+              <Zap size={16} className="text-green-500" />
+              <p className="text-green-400 text-sm font-medium">{successMsg}</p>
+            </div>
           )}
 
-          <button
-            type="submit"
-            disabled={(!geminiKey.trim() && !groqKey.trim()) || isLoading}
-            className="w-full bg-blue-600 hover:bg-blue-500 disabled:opacity-50 disabled:hover:bg-blue-600 text-white font-semibold py-3 rounded-lg flex items-center justify-center gap-2 transition-colors mt-2"
-          >
-            {isLoading ? 'Verifying...' : 'Start Trading'}
-            {!isLoading && <ArrowRight size={18} />}
-          </button>
-        </form>
-      </div>
-    </div>
-  );
-}
-"""
+          {error && (
+            <div className="bg-red-500/10 border border-red-500/20 p-4 rounded-lg flex flex-col gap-2 max-h-48 overflow-y-auto">
+              <p className="text-red-500 text-sm font-bold">Verification Failed:</p>
+              <pre className="text-red-400 text-xs whitespace-pre-wrap font-mono">{error}</pre>
+            </div>
+          )}"""
+content = content.replace(old_error, new_error)
 
 with open('src/components/ApiKeyScreen.tsx', 'w') as f:
     f.write(content)
