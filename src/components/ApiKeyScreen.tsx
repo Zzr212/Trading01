@@ -3,11 +3,14 @@ import { KeyRound, ArrowRight, Zap } from 'lucide-react';
 
 interface Props {
   onValidKey: (geminiKey: string, groqKey: string) => void;
+  onClose?: () => void;
+  initialGemini?: string;
+  initialGroq?: string;
 }
 
-export default function ApiKeyScreen({ onValidKey }: Props) {
-  const [geminiKey, setGeminiKey] = useState('');
-  const [groqKey, setGroqKey] = useState('');
+export default function ApiKeyScreen({ onValidKey, onClose, initialGemini = '', initialGroq = '' }: Props) {
+  const [geminiKey, setGeminiKey] = useState(initialGemini);
+  const [groqKey, setGroqKey] = useState(initialGroq);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
 
@@ -44,8 +47,14 @@ export default function ApiKeyScreen({ onValidKey }: Props) {
   };
 
   return (
-    <div className="min-h-screen bg-neutral-950 flex flex-col items-center justify-center p-4">
-      <div className="max-w-md w-full bg-neutral-900 border border-neutral-800 rounded-2xl p-8 flex flex-col gap-6 shadow-2xl">
+    <div className="w-full max-w-md bg-neutral-900 border border-neutral-800 rounded-2xl p-8 flex flex-col gap-6 shadow-2xl relative">
+        
+        {onClose && (
+          <button onClick={onClose} className="absolute top-4 right-4 text-neutral-500 hover:text-neutral-300">
+            ✕
+          </button>
+        )}
+
         <div className="w-12 h-12 bg-blue-500/10 rounded-xl flex items-center justify-center text-blue-500 mb-2">
           <KeyRound size={24} />
         </div>
@@ -98,11 +107,10 @@ export default function ApiKeyScreen({ onValidKey }: Props) {
             disabled={(!geminiKey.trim() && !groqKey.trim()) || isLoading}
             className="w-full bg-blue-600 hover:bg-blue-500 disabled:opacity-50 disabled:hover:bg-blue-600 text-white font-semibold py-3 rounded-lg flex items-center justify-center gap-2 transition-colors mt-2"
           >
-            {isLoading ? 'Verifying...' : 'Start Trading'}
+            {isLoading ? 'Verifying...' : 'Verify & Save'}
             {!isLoading && <ArrowRight size={18} />}
           </button>
         </form>
-      </div>
     </div>
   );
 }

@@ -10,6 +10,7 @@ export default function App() {
   const [geminiKey, setGeminiKey] = useState<string>(localStorage.getItem('gemini_api_key') || '');
   const [groqKey, setGroqKey] = useState<string>(localStorage.getItem('groq_api_key') || '');
   const [isKeyValid, setIsKeyValid] = useState<boolean>(false);
+  const [showKeyModal, setShowKeyModal] = useState<boolean>(!localStorage.getItem('gemini_api_key') && !localStorage.getItem('groq_api_key'));
   const [trades, setTrades] = useState<Trade[]>([]);
   const [errors, setErrors] = useState<AppError[]>([]);
   const [sentimentScore, setSentimentScore] = useState(50);
@@ -68,7 +69,7 @@ export default function App() {
           localStorage.removeItem('groq_api_key');
           setGeminiKey('');
           setGroqKey('');
-          addError("API Key validation failed. Please re-enter.");
+          addError("API validation failed.");
         }
       })
       .catch(e => addError("Network error validating API keys"));
@@ -76,6 +77,7 @@ export default function App() {
   }, [geminiKey, groqKey, fetchTrades, addError]);
 
   const handleValidKey = (newGeminiKey: string, newGroqKey: string) => {
+    setShowKeyModal(false);
     localStorage.setItem('gemini_api_key', newGeminiKey);
     localStorage.setItem('groq_api_key', newGroqKey);
     setGeminiKey(newGeminiKey);
@@ -111,9 +113,7 @@ export default function App() {
     }
   }, [currentPrice, trades, addError]);
 
-  if (!isKeyValid) {
-    return <ApiKeyScreen onValidKey={handleValidKey} />;
-  }
+
 
   const activeTrade = trades.find(t => t.status === 'ACTIVE') || null;
   const historyTrades = trades.filter(t => t.status !== 'ACTIVE');
@@ -121,7 +121,17 @@ export default function App() {
   const isHistoryTab = activeTab === 'HISTORY';
 
   return (
-    <div className="h-[100dvh] w-full flex flex-col bg-neutral-950 font-sans selection:bg-blue-500/30 overflow-hidden">
+    <div className="h-[100dvh] w-full flex flex-col bg-neutral-950 font-sans selection:bg-blue-500/30 overflow-hidden relative">
+      {showKeyModal && (
+        <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+          <ApiKeyScreen 
+            onValidKey={handleValidKey} 
+            onClose={() => setShowKeyModal(false)} 
+            initialGemini={geminiKey}
+            initialGroq={groqKey}
+          />
+        </div>
+      )}
       {/* Top Half - Chart (Dynamically sized) */}
       <div className={`transition-all duration-500 ease-in-out ${isHistoryTab ? 'h-[40%]' : 'h-[70%]'} min-h-0 relative`}>
         <ChartContainer 
@@ -138,6 +148,8 @@ export default function App() {
       {/* Bottom Half - AI Suggestions & History (Dynamically sized) */}
       <div className={`transition-all duration-500 ease-in-out ${isHistoryTab ? 'h-[60%]' : 'h-[30%]'} min-h-0 border-t-2 border-neutral-900 shadow-[0_-8px_30px_rgba(0,0,0,0.5)] z-10 relative`}>
         <TradePanel 
+          aiAvailable={isKeyValid}
+          onOpenKeys={() => setShowKeyModal(true)}
           activeTrade={activeTrade} 
           history={historyTrades}
           sentimentScore={sentimentScore}

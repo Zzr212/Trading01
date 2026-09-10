@@ -29,7 +29,7 @@ export default function ChartContainer({ geminiKey, groqKey, activeTrade, onPric
 
   // Initial Multi-Timeframe S/R Analysis
   useEffect(() => {
-    if (!apiKey) return;
+    if (!geminiKey && !groqKey) return;
     const fetchSR = async () => {
       try {
         // Fetch shorter timeframes suitable for scalping
@@ -43,7 +43,8 @@ export default function ChartContainer({ geminiKey, groqKey, activeTrade, onPric
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'Authorization': `Bearer ${apiKey}`
+            'x-gemini-key': geminiKey,
+          'x-groq-key': groqKey
           },
           body: JSON.stringify({ tf1h, tf15m, tf5m })
         });
@@ -238,7 +239,8 @@ export default function ChartContainer({ geminiKey, groqKey, activeTrade, onPric
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${apiKey}`
+          'x-gemini-key': geminiKey,
+          'x-groq-key': groqKey
         },
         body: JSON.stringify({
           type: signalType,
@@ -281,7 +283,7 @@ export default function ChartContainer({ geminiKey, groqKey, activeTrade, onPric
         analyzingRef.current = false;
       });
     }
-  }, [enrichedData, activeTrade, apiKey, srLevels, onPriceUpdate, onSentimentUpdate, onTradeCreated, onError]);
+  }, [enrichedData, activeTrade, geminiKey, groqKey, srLevels, onPriceUpdate, onSentimentUpdate, onTradeCreated, onError]);
 
   return (
     <div className="w-full h-full flex flex-col border-b border-neutral-900 bg-neutral-950">

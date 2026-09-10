@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { Trade, AppError } from '../types';
-import { Clock, TrendingUp, TrendingDown, CheckCircle2, XCircle, Play, Trash2, Power } from 'lucide-react';
+import { Clock, TrendingUp, TrendingDown, CheckCircle2, XCircle, Play, Trash2, Power, KeyRound } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import SentimentMeter from './SentimentMeter';
 import TradeReplayModal from './TradeReplayModal';
@@ -8,6 +8,8 @@ import TradeReplayModal from './TradeReplayModal';
 type TabType = 'ACTIVE' | 'HISTORY' | 'ERRORS';
 
 interface Props {
+  aiAvailable?: boolean;
+  onOpenKeys?: () => void;
   activeTrade: Trade | null;
   history: Trade[];
   sentimentScore: number;
@@ -18,7 +20,7 @@ interface Props {
   onReboot: () => void;
 }
 
-export default function TradePanel({ activeTrade, history, sentimentScore, errors, onClearErrors, activeTab, setActiveTab, onReboot }: Props) {
+export default function TradePanel({ aiAvailable, onOpenKeys, activeTrade, history, sentimentScore, errors, onClearErrors, activeTab, setActiveTab, onReboot }: Props) {
   const [replayingTrade, setReplayingTrade] = useState<Trade | null>(null);
 
   const { wins, losses, winRate } = useMemo(() => {
