@@ -95,7 +95,7 @@ export default function TradePanel({ activeTrade, history, sentimentScore }: Pro
   );
 }
 
-function TradeItem({ trade }: { trade: Trade }) {
+function TradeItem({ trade }: { trade: Trade; key?: React.Key }) {
   const isLong = trade.type === 'LONG';
   
   return (

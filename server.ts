@@ -1,24 +1,22 @@
 import express from "express";
 import path from "path";
-import sqlite3 from "sqlite3";
+import { DatabaseSync } from "node:sqlite";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI } from "@google/genai";
 
-const db = new sqlite3.Database("./trades.db");
+const db = new DatabaseSync("./trades.db");
 
-db.serialize(() => {
-  db.run(`CREATE TABLE IF NOT EXISTS trades (
-    id TEXT PRIMARY KEY,
-    pair TEXT,
-    type TEXT,
-    entryPrice REAL,
-    takeProfit REAL,
-    stopLoss REAL,
-    status TEXT,
-    timestamp INTEGER,
-    confidence INTEGER
-  )`);
-});
+db.exec(`CREATE TABLE IF NOT EXISTS trades (
+  id TEXT PRIMARY KEY,
+  pair TEXT,
+  type TEXT,
+  entryPrice REAL,
+  takeProfit REAL,
+  stopLoss REAL,
+  status TEXT,
+  timestamp INTEGER,
+  confidence INTEGER
+)`);
 
 async function startServer() {
   const app = express();
@@ -28,30 +26,37 @@ async function startServer() {
 
   // API Routes
   app.get("/api/trades", (req, res) => {
-    db.all("SELECT * FROM trades ORDER BY timestamp DESC", (err, rows) => {
-      if (err) return res.status(500).json({ error: err.message });
+    try {
+      const stmt = db.prepare("SELECT * FROM trades ORDER BY timestamp DESC");
+      const rows = stmt.all();
       res.json(rows);
-    });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
   });
 
   app.post("/api/trades", (req, res) => {
     const t = req.body;
-    db.run(
-      "INSERT INTO trades VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-      [t.id, t.pair, t.type, t.entryPrice, t.takeProfit, t.stopLoss, t.status, t.timestamp, t.confidence],
-      (err) => {
-        if (err) return res.status(500).json({ error: err.message });
-        res.json({ success: true });
-      }
-    );
+    try {
+      const stmt = db.prepare(
+        "INSERT INTO trades VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
+      );
+      stmt.run(t.id, t.pair, t.type, t.entryPrice, t.takeProfit, t.stopLoss, t.status, t.timestamp, t.confidence);
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
   });
 
   app.put("/api/trades/:id", (req, res) => {
     const { status } = req.body;
-    db.run("UPDATE trades SET status = ? WHERE id = ?", [status, req.params.id], (err) => {
-      if (err) return res.status(500).json({ error: err.message });
+    try {
+      const stmt = db.prepare("UPDATE trades SET status = ? WHERE id = ?");
+      stmt.run(status, req.params.id);
       res.json({ success: true });
-    });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
   });
 
   app.post("/api/verify-key", async (req, res) => {
