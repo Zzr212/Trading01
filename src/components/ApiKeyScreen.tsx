@@ -22,10 +22,10 @@ export default function ApiKeyScreen({ onValidKey, onClose, initialGemini = '', 
     if (isLoading) {
       const statuses = [
         "Connecting to AI Providers...",
+        "Testing Gemini-3.6-Flash...",
         "Testing Gemini-2.5-Flash...",
-        "Testing Gemini-2.5-Pro...",
         "Testing Groq Llama-3.3-70B...",
-        "Testing Groq Llama-8B...",
+        "Testing Groq Llama-3.1-8B...",
         "Verifying capabilities..."
       ];
       let i = 0;

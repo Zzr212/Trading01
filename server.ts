@@ -27,8 +27,8 @@ db.exec(`CREATE TABLE IF NOT EXISTS trade_reviews (
 async function callAIWithFallback(geminiKey: string | undefined, groqKey: string | undefined, prompt: string, isJson = true) {
   let errors: string[] = [];
   
-  const geminiModels = ["gemini-2.5-flash", "gemini-2.5-pro"];
-  const groqModels = ["llama-3.3-70b-versatile", "llama3-8b-8192", "mixtral-8x7b-32768"];
+  const geminiModels = ["gemini-3.6-flash", "gemini-2.5-flash", "gemini-2.5-pro"];
+  const groqModels = ["llama-3.3-70b-versatile", "llama-3.1-8b-instant", "mixtral-8x7b-32768"];
 
   if (geminiKey) {
     const ai = new GoogleGenAI({ apiKey: geminiKey });
