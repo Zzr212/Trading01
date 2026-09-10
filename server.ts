@@ -100,6 +100,16 @@ async function startServer() {
     }
   });
 
+  app.delete("/api/reset", (req, res) => {
+    try {
+      db.exec("DELETE FROM trades");
+      db.exec("DELETE FROM trade_reviews");
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   app.post("/api/reviews", (req, res) => {
     const { tradeId, candles } = req.body;
     try {

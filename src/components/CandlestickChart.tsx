@@ -225,6 +225,8 @@ export default function CandlestickChart({ data, timeframe, activeTrade, isRepla
     return () => observer.disconnect();
   }, [draw]);
 
+  const prevDataLengthRef = useRef(0);
+
   // Update chart when data changes
   useEffect(() => {
     if (data.length > 0) {
@@ -233,11 +235,16 @@ export default function CandlestickChart({ data, timeframe, activeTrade, isRepla
       if (data.length > 1) {
         setPriceChange(last.close >= data[data.length - 2].close ? 'up' : 'down');
       }
-    }
-    
-    // Auto-scroll logic if we are near the right edge
-    if (!stateRef.current.isDragging && stateRef.current.offset < 5 && !isReplay) {
-      stateRef.current.offset = -20; // Keep blank space on the right
+      
+      // Keep historical view stable when new data arrives
+      if (prevDataLengthRef.current > 0 && data.length > prevDataLengthRef.current) {
+        const diff = data.length - prevDataLengthRef.current;
+        // If the user has scrolled into the past (offset > 0), increment offset to maintain their visual position
+        if (stateRef.current.offset > 0) {
+          stateRef.current.offset += diff;
+        }
+      }
+      prevDataLengthRef.current = data.length;
     }
     
     requestAnimationFrame(draw);

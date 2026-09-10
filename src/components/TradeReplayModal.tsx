@@ -9,7 +9,7 @@ interface Props {
 }
 
 export default function TradeReplayModal({ trade, onClose }: Props) {
-  const [historyCandles, setHistoryCandles] = useState<Kline[]>([]);
+  const [frames, setFrames] = useState<Kline[][]>([]);
   const [visibleCandles, setVisibleCandles] = useState<Kline[]>([]);
   const [isPlaying, setIsPlaying] = useState(false);
   const [speed, setSpeed] = useState(1);
@@ -22,12 +22,44 @@ export default function TradeReplayModal({ trade, onClose }: Props) {
       .then(r => r.json())
       .then(data => {
         if (data.success && data.candles && data.candles.length > 0) {
-          setHistoryCandles(data.candles);
-          // Show the first 50 candles (before the trade) as context initially
-          const entryIndex = data.candles.findIndex((c: Kline) => c.time >= trade.timestamp);
-          const startIndex = Math.max(0, entryIndex - 50);
-          setCurrentIndex(entryIndex);
-          setVisibleCandles(data.candles.slice(startIndex, entryIndex + 1));
+          const rawData = data.candles as Kline[];
+          
+          const builtFrames: Kline[][] = [];
+          let currentFrame: Kline[] = [];
+
+          // Reconstruct the chart tick-by-tick to prevent "dots" issue
+          rawData.forEach(kline => {
+            if (currentFrame.length === 0) {
+              currentFrame.push(kline);
+            } else {
+              const last = currentFrame[currentFrame.length - 1];
+              if (kline.time === last.time) {
+                // Update the current candle with new tick data
+                currentFrame[currentFrame.length - 1] = kline;
+              } else if (kline.time > last.time) {
+                // Time shifted, new candle started
+                currentFrame.push(kline);
+              }
+            }
+            // Store a snapshot of the chart at this tick
+            builtFrames.push([...currentFrame]);
+          });
+
+          setFrames(builtFrames);
+          
+          // Fast-forward through the 50 context candles to the exact moment the trade started
+          let startIdx = 0;
+          for (let i = 0; i < builtFrames.length; i++) {
+            const frame = builtFrames[i];
+            if (frame[frame.length - 1].time >= trade.timestamp) {
+              startIdx = i;
+              break;
+            }
+          }
+          if (startIdx === 0) startIdx = Math.min(49, builtFrames.length - 1);
+
+          setCurrentIndex(startIdx);
+          setVisibleCandles(builtFrames[startIdx].slice(-100)); // Show max 100 candles
         }
       })
       .catch(console.error);
@@ -35,21 +67,20 @@ export default function TradeReplayModal({ trade, onClose }: Props) {
 
   const playStep = useCallback(() => {
     setCurrentIndex(prev => {
-      if (prev >= historyCandles.length - 1) {
+      if (prev >= frames.length - 1) {
         setIsPlaying(false);
         return prev;
       }
       const nextIndex = prev + 1;
-      // Keep last 100 candles visible in the window
-      const startIndex = Math.max(0, nextIndex - 100);
-      setVisibleCandles(historyCandles.slice(startIndex, nextIndex + 1));
+      setVisibleCandles(frames[nextIndex].slice(-100));
       return nextIndex;
     });
-  }, [historyCandles]);
+  }, [frames]);
 
   useEffect(() => {
     if (isPlaying) {
-      timerRef.current = setInterval(playStep, 500 / speed);
+      // 100ms base interval for tick playback
+      timerRef.current = setInterval(playStep, 100 / speed);
     } else if (timerRef.current) {
       clearInterval(timerRef.current);
     }
@@ -61,8 +92,7 @@ export default function TradeReplayModal({ trade, onClose }: Props) {
   const handleSliderChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const val = parseInt(e.target.value);
     setCurrentIndex(val);
-    const startIndex = Math.max(0, val - 100);
-    setVisibleCandles(historyCandles.slice(startIndex, val + 1));
+    setVisibleCandles(frames[val].slice(-100));
   };
 
   return (
@@ -82,7 +112,7 @@ export default function TradeReplayModal({ trade, onClose }: Props) {
 
       {/* Chart */}
       <div className="flex-1 relative bg-neutral-950">
-        {historyCandles.length > 0 ? (
+        {frames.length > 0 ? (
           <CandlestickChart 
             data={visibleCandles} 
             timeframe="1m" 
@@ -91,7 +121,8 @@ export default function TradeReplayModal({ trade, onClose }: Props) {
           />
         ) : (
           <div className="flex items-center justify-center h-full text-neutral-500">
-            Loading trade history...
+            <div className="w-6 h-6 rounded-full border-2 border-neutral-800 border-t-neutral-500 animate-spin mr-3" />
+            Loading detailed tick replay...
           </div>
         )}
       </div>
@@ -102,7 +133,7 @@ export default function TradeReplayModal({ trade, onClose }: Props) {
         <input 
           type="range" 
           min="0" 
-          max={Math.max(0, historyCandles.length - 1)} 
+          max={Math.max(0, frames.length - 1)} 
           value={currentIndex}
           onChange={handleSliderChange}
           className="w-full accent-blue-500"
@@ -119,19 +150,19 @@ export default function TradeReplayModal({ trade, onClose }: Props) {
           
           <button 
             onClick={() => setIsPlaying(!isPlaying)}
-            className="w-14 h-14 bg-white text-black rounded-full flex items-center justify-center hover:bg-neutral-200"
+            className="w-14 h-14 bg-white text-black rounded-full flex items-center justify-center hover:bg-neutral-200 transition-colors"
           >
             {isPlaying ? <Pause size={28} /> : <Play size={28} className="ml-1" />}
           </button>
           
           <button 
-            onClick={() => setSpeed(s => Math.min(5, s + 1))}
+            onClick={() => setSpeed(s => Math.min(10, s + 1))}
             className="text-neutral-400 hover:text-white"
           >
             <FastForward size={24} />
           </button>
           
-          <div className="absolute right-6 text-sm font-mono text-neutral-500">
+          <div className="absolute right-6 text-sm font-mono text-neutral-500 bg-neutral-950 px-2 py-1 rounded">
             {speed}x
           </div>
         </div>

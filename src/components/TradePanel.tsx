@@ -1,9 +1,11 @@
 import React, { useState, useMemo } from 'react';
 import { Trade, AppError } from '../types';
-import { Clock, TrendingUp, TrendingDown, CheckCircle2, XCircle, Play, Trash2 } from 'lucide-react';
+import { Clock, TrendingUp, TrendingDown, CheckCircle2, XCircle, Play, Trash2, Power } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import SentimentMeter from './SentimentMeter';
 import TradeReplayModal from './TradeReplayModal';
+
+type TabType = 'ACTIVE' | 'HISTORY' | 'ERRORS';
 
 interface Props {
   activeTrade: Trade | null;
@@ -11,10 +13,12 @@ interface Props {
   sentimentScore: number;
   errors: AppError[];
   onClearErrors: () => void;
+  activeTab: TabType;
+  setActiveTab: (tab: TabType) => void;
+  onReboot: () => void;
 }
 
-export default function TradePanel({ activeTrade, history, sentimentScore, errors, onClearErrors }: Props) {
-  const [activeTab, setActiveTab] = useState<'ACTIVE' | 'HISTORY' | 'ERRORS'>('ACTIVE');
+export default function TradePanel({ activeTrade, history, sentimentScore, errors, onClearErrors, activeTab, setActiveTab, onReboot }: Props) {
   const [replayingTrade, setReplayingTrade] = useState<Trade | null>(null);
 
   const { wins, losses, winRate } = useMemo(() => {
@@ -36,7 +40,7 @@ export default function TradePanel({ activeTrade, history, sentimentScore, error
     if (activeTab === 'ERRORS' && errors.length === 0) {
       setActiveTab('ACTIVE');
     }
-  }, [errors.length, activeTab]);
+  }, [errors.length, activeTab, setActiveTab]);
 
   return (
     <div className="w-full h-full flex flex-col bg-neutral-950 text-neutral-200">
@@ -45,31 +49,39 @@ export default function TradePanel({ activeTrade, history, sentimentScore, error
       </div>
 
       {/* Tab Navigation */}
-      <div className="flex px-4 pt-4 border-b border-neutral-900 gap-8">
-        {(['ACTIVE', 'HISTORY'] as const).map(tab => (
-          <button
-            key={tab}
-            onClick={() => setActiveTab(tab)}
-            className={`pb-3 text-sm font-semibold transition-colors relative ${activeTab === tab ? 'text-white' : 'text-neutral-500 hover:text-neutral-300'}`}
-          >
-            {tab.charAt(0) + tab.slice(1).toLowerCase()}
-            {activeTab === tab && (
-              <motion.div layoutId="activeTab" className="absolute bottom-0 left-0 right-0 h-0.5 bg-neutral-200" />
-            )}
-          </button>
-        ))}
-        {errors.length > 0 && (
-          <button
-            onClick={() => setActiveTab('ERRORS')}
-            className={`pb-3 text-sm font-semibold transition-colors relative flex items-center gap-2 ${activeTab === 'ERRORS' ? 'text-red-500' : 'text-red-500/70 hover:text-red-500'}`}
-          >
-            Errors
-            <span className="bg-red-500 text-white text-[10px] px-1.5 py-0.5 rounded-full">{errors.length}</span>
-            {activeTab === 'ERRORS' && (
-              <motion.div layoutId="activeTab" className="absolute bottom-0 left-0 right-0 h-0.5 bg-red-500" />
-            )}
-          </button>
-        )}
+      <div className="flex px-4 pt-4 border-b border-neutral-900 gap-8 justify-between items-center">
+        <div className="flex gap-8">
+          {(['ACTIVE', 'HISTORY'] as const).map(tab => (
+            <button
+              key={tab}
+              onClick={() => setActiveTab(tab)}
+              className={`pb-3 text-sm font-semibold transition-colors relative ${activeTab === tab ? 'text-white' : 'text-neutral-500 hover:text-neutral-300'}`}
+            >
+              {tab.charAt(0) + tab.slice(1).toLowerCase()}
+              {activeTab === tab && (
+                <motion.div layoutId="activeTab" className="absolute bottom-0 left-0 right-0 h-0.5 bg-neutral-200" />
+              )}
+            </button>
+          ))}
+          {errors.length > 0 && (
+            <button
+              onClick={() => setActiveTab('ERRORS')}
+              className={`pb-3 text-sm font-semibold transition-colors relative flex items-center gap-2 ${activeTab === 'ERRORS' ? 'text-red-500' : 'text-red-500/70 hover:text-red-500'}`}
+            >
+              Errors
+              <span className="bg-red-500 text-white text-[10px] px-1.5 py-0.5 rounded-full">{errors.length}</span>
+              {activeTab === 'ERRORS' && (
+                <motion.div layoutId="activeTab" className="absolute bottom-0 left-0 right-0 h-0.5 bg-red-500" />
+              )}
+            </button>
+          )}
+        </div>
+        <button
+          onClick={onReboot}
+          className="pb-3 text-sm font-bold text-red-500 hover:text-red-400 transition-colors flex items-center gap-1.5"
+        >
+          <Power size={14} /> Reboot
+        </button>
       </div>
 
       {/* List Container */}

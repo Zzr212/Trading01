@@ -58,20 +58,20 @@ export default function ChartContainer({ apiKey, activeTrade, onPriceUpdate, onS
     fetchSR();
   }, [apiKey, onError]);
 
-  // Handle active trade recording
+  // Handle active trade recording (Tick by Tick)
   useEffect(() => {
-    if (activeTrade && data.length > 0) {
-      // Append latest candle to recording buffer if we are in an active trade
-      const current = data[data.length - 1];
-      if (recordedCandlesRef.current.length === 0 || recordedCandlesRef.current[recordedCandlesRef.current.length - 1].time !== current.time) {
+    if (activeTrade && enrichedData.length > 0) {
+      // Record every distinct tick (WS update) during the trade
+      const current = enrichedData[enrichedData.length - 1];
+      const lastRecorded = recordedCandlesRef.current[recordedCandlesRef.current.length - 1];
+      
+      if (!lastRecorded || lastRecorded !== current) {
         recordedCandlesRef.current.push(current);
       }
     } else if (!activeTrade && recordedCandlesRef.current.length > 0) {
-      // Trade just ended, upload recording to server
-      const tradeIdToSave = recordedCandlesRef.current[0].time.toString(); // Just need a way to pass ID, but wait, the trade ID isn't directly here unless we save it.
-      // Better: we can look up the ID from the last known active trade. We should store it in a ref.
+      // Handled in next useEffect
     }
-  }, [data, activeTrade]);
+  }, [enrichedData, activeTrade]);
 
   const lastActiveTradeIdRef = useRef<string | null>(null);
   
