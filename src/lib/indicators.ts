@@ -183,3 +183,27 @@ export function calculateVWAP(data: Kline[]): number[] {
 
   return vwap;
 }
+
+export function calculateVPVR(data: Kline[], bins: number = 50): { price: number, volume: number }[] {
+  if (data.length === 0) return [];
+  let minPrice = Math.min(...data.map(d => d.low));
+  let maxPrice = Math.max(...data.map(d => d.high));
+  if (maxPrice === minPrice) maxPrice += 1; // Prevent div by 0
+  const binSize = (maxPrice - minPrice) / bins;
+  
+  const profile = new Array(bins).fill(0).map((_, i) => ({
+    price: minPrice + (i * binSize) + (binSize / 2),
+    volume: 0
+  }));
+
+  for (const candle of data) {
+    const candleAvgPrice = (candle.high + candle.low + candle.close) / 3;
+    let binIndex = Math.floor((candleAvgPrice - minPrice) / binSize);
+    if (binIndex >= bins) binIndex = bins - 1;
+    if (binIndex >= 0) {
+      profile[binIndex].volume += candle.volume;
+    }
+  }
+
+  return profile.sort((a, b) => b.volume - a.volume);
+}
