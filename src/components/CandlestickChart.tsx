@@ -237,14 +237,19 @@ export default function CandlestickChart({ data, timeframe, activeTrade, isRepla
       }
       
       // Keep historical view stable when new data arrives
-      if (prevDataLengthRef.current > 0 && data.length > prevDataLengthRef.current) {
+      if (prevDataLengthRef.current > 0 && data.length > prevDataLengthRef.current && (data.length - prevDataLengthRef.current < 50)) {
         const diff = data.length - prevDataLengthRef.current;
         // If the user has scrolled into the past (offset > 0), increment offset to maintain their visual position
         if (stateRef.current.offset > 0) {
           stateRef.current.offset += diff;
         }
+      } else if (prevDataLengthRef.current === 0 || Math.abs(data.length - prevDataLengthRef.current) > 50) {
+        // Data completely changed or first load, reset offset
+        stateRef.current.offset = isReplay ? 0 : -20;
       }
       prevDataLengthRef.current = data.length;
+    } else {
+      prevDataLengthRef.current = 0;
     }
     
     requestAnimationFrame(draw);

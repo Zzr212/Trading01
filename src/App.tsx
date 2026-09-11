@@ -44,19 +44,6 @@ export default function App() {
     fetchTrades();
   }, [fetchTrades]);
 
-  const handleTradeCreated = useCallback(async (t: Trade) => {
-    setTrades(prev => [t, ...prev]);
-    try {
-      await fetch('/api/trades', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(t)
-      });
-    } catch (e: any) {
-      addError("Failed to save trade: " + e.message);
-    }
-  }, [addError]);
-
   // Evaluate Active Trade
   useEffect(() => {
     const activeTrade = trades.find(t => t.status === 'ACTIVE');
@@ -96,7 +83,14 @@ export default function App() {
           activeTrade={activeTrade}
           onPriceUpdate={setCurrentPrice}
           onSentimentUpdate={setSentimentScore}
-          onTradeCreated={handleTradeCreated}
+          onTradeCreated={(t) => {
+            setTrades(prev => [t, ...prev]);
+            fetch('/api/trades', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(t)
+            }).catch(e => addError("Failed to save trade: " + e.message));
+          }}
           onError={addError}
         />
       </div>

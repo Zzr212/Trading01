@@ -213,23 +213,18 @@ export default function ChartContainer({ activeTrade, onPriceUpdate, onSentiment
     analyzingRef.current = true;
     onSentimentUpdate(signalType === 'LONG' ? 85 : 15); // Set fake sentiment based on algo
 
-    // Calculate dynamic risk with minimum gap safeguards
-    const atr = current.atr || (current.close * 0.002);
+    // Calculate dynamic risk
+    const atr = current.atr || (current.close * 0.005);
     const entryPrice = current.close;
     
-    // Prevent noise from instantly closing trades by enforcing a minimum gap (0.15% for SL)
-    const minGap = entryPrice * 0.0015;
-    const slDist = Math.max(atr * 2.0, minGap);
-    const tpDist = Math.max(atr * 4.0, minGap * 2);
-    
-    // Risk:Reward = 1:2 minimum
+    // Risk:Reward = 1:2
     let stopLoss, takeProfit;
     if (signalType === 'LONG') {
-      stopLoss = entryPrice - slDist;
-      takeProfit = entryPrice + tpDist;
+      stopLoss = entryPrice - (atr * 1.5);
+      takeProfit = entryPrice + (atr * 3.0);
     } else {
-      stopLoss = entryPrice + slDist;
-      takeProfit = entryPrice - tpDist;
+      stopLoss = entryPrice + (atr * 1.5);
+      takeProfit = entryPrice - (atr * 3.0);
     }
     
     const trade: Trade = {
@@ -242,7 +237,8 @@ export default function ChartContainer({ activeTrade, onPriceUpdate, onSentiment
       status: 'ACTIVE',
       timestamp: Date.now(),
       confidence: 80,
-      reason: `Algorithmic ${signalType} Signal based on EMA+MACD confluence. Volatility scaled targets.`
+      reason: `Algorithmic ${signalType} Signal based on EMA+MACD confluence. Volatility scaled targets using ATR.`,
+      result: 0
     };
     
     onTradeCreated(trade);
