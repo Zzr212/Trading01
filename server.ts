@@ -2,6 +2,8 @@ import express from "express";
 import path from "path";
 import { DatabaseSync } from "node:sqlite";
 import { createServer as createViteServer } from "vite";
+import { TradingBot } from './bot';
+
 
 const db = new DatabaseSync("./trades.db");
 
@@ -23,6 +25,9 @@ db.exec(`CREATE TABLE IF NOT EXISTS trade_reviews (
 )`);
 
 async function startServer() {
+  const bot = new TradingBot(db);
+  bot.start();
+
   const app = express();
   const PORT = 3000;
   

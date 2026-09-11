@@ -42,34 +42,10 @@ export default function App() {
 
   useEffect(() => {
     fetchTrades();
+    const interval = setInterval(fetchTrades, 3000);
+    return () => clearInterval(interval);
   }, [fetchTrades]);
 
-  // Evaluate Active Trade
-  useEffect(() => {
-    const activeTrade = trades.find(t => t.status === 'ACTIVE');
-    if (!activeTrade || currentPrice === 0) return;
-
-    let result: 'WON' | 'LOST' | null = null;
-    if (activeTrade.type === 'LONG') {
-      if (currentPrice >= activeTrade.takeProfit) result = 'WON';
-      else if (currentPrice <= activeTrade.stopLoss) result = 'LOST';
-    } else {
-      if (currentPrice <= activeTrade.takeProfit) result = 'WON';
-      else if (currentPrice >= activeTrade.stopLoss) result = 'LOST';
-    }
-
-    if (result) {
-      // Optimistic update
-      setTrades(prev => prev.map(t => t.id === activeTrade.id ? { ...t, status: result } : t));
-      
-      // Notify backend
-      fetch(`/api/trades/${activeTrade.id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status: result })
-      }).catch(e => addError("Failed to update trade status: " + e.message));
-    }
-  }, [currentPrice, trades, addError]);
 
   const activeTrade = trades.find(t => t.status === 'ACTIVE') || null;
   const historyTrades = trades.filter(t => t.status !== 'ACTIVE');

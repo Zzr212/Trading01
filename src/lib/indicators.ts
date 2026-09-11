@@ -163,3 +163,23 @@ export function findSupportResistance(data: Kline[]): { supports: number[], resi
     resistances: distinct(resistances).slice(0, 3)
   };
 }
+
+export function calculateVWAP(data: Kline[]): number[] {
+  const vwap = new Array(data.length).fill(null);
+  let cumulativeTPV = 0; // Typical Price * Volume
+  let cumulativeVolume = 0;
+
+  for (let i = 0; i < data.length; i++) {
+    const typicalPrice = (data[i].high + data[i].low + data[i].close) / 3;
+    const tpv = typicalPrice * data[i].volume;
+    
+    cumulativeTPV += tpv;
+    cumulativeVolume += data[i].volume;
+
+    if (cumulativeVolume > 0) {
+      vwap[i] = cumulativeTPV / cumulativeVolume;
+    }
+  }
+
+  return vwap;
+}
