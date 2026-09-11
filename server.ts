@@ -2,7 +2,6 @@ import express from "express";
 import path from "path";
 import { DatabaseSync } from "node:sqlite";
 import { createServer as createViteServer } from "vite";
-import { GoogleGenAI } from "@google/genai";
 
 const db = new DatabaseSync("./trades.db");
 
@@ -22,58 +21,6 @@ db.exec(`CREATE TABLE IF NOT EXISTS trade_reviews (
   tradeId TEXT PRIMARY KEY,
   candles TEXT
 )`);
-
-
-async function callAIWithFallback(geminiKey: string | undefined, groqKey: string | undefined, prompt: string, isJson = true) {
-  let errors: string[] = [];
-  
-  const geminiModels = ["gemini-3.6-flash", "gemini-2.5-flash", "gemini-2.5-pro"];
-  const groqModels = ["llama-3.3-70b-versatile", "llama-3.1-8b-instant", "mixtral-8x7b-32768"];
-
-  if (geminiKey) {
-    const ai = new GoogleGenAI({ apiKey: geminiKey });
-    for (const model of geminiModels) {
-      try {
-        const response = await ai.models.generateContent({
-          model: model,
-          contents: prompt,
-          config: isJson ? { responseMimeType: "application/json" } : undefined
-        });
-        return { text: response.text, provider: 'Gemini', model };
-      } catch (e: any) {
-        console.warn(`Gemini (${model}) failed: ${e.message}`);
-        errors.push(`Gemini ${model}: ${e.message}`);
-      }
-    }
-  }
-
-  if (groqKey) {
-    for (const model of groqModels) {
-      try {
-        const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-          method: "POST",
-          headers: {
-            "Authorization": `Bearer ${groqKey}`,
-            "Content-Type": "application/json"
-          },
-          body: JSON.stringify({
-            model: model,
-            messages: [{ role: "user", content: prompt }],
-            response_format: isJson ? { type: "json_object" } : undefined
-          })
-        });
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.error?.message || "Groq API Error");
-        return { text: data.choices[0].message.content, provider: 'Groq', model };
-      } catch (e: any) {
-        console.warn(`Groq (${model}) failed: ${e.message}`);
-        errors.push(`Groq ${model}: ${e.message}`);
-      }
-    }
-  }
-  
-  throw new Error(`All models failed.\nAttempts:\n${errors.join('\n')}`);
-}
 
 async function startServer() {
   const app = express();
@@ -156,92 +103,6 @@ async function startServer() {
       res.json({ success: true });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
-    }
-  });
-
-  app.post("/api/verify-key", async (req, res) => {
-    const geminiKey = req.headers['x-gemini-key'] as string;
-    const groqKey = req.headers['x-groq-key'] as string;
-    
-    if (!geminiKey && !groqKey) return res.status(401).json({ error: "No keys provided" });
-    
-    try {
-      const { provider, model } = await callAIWithFallback(geminiKey, groqKey, "Respond with exactly 'ok'.", false);
-      res.json({ valid: true, provider, model });
-    } catch (e: any) {
-      res.status(400).json({ valid: false, error: e.message });
-    }
-  });
-
-  app.post("/api/analyze-sr", async (req, res) => {
-    const geminiKey = req.headers['x-gemini-key'] as string;
-    const groqKey = req.headers['x-groq-key'] as string;
-    
-    if (!geminiKey && !groqKey) return res.status(401).json({ error: "No keys provided" });
-    
-    try {
-      const { tf1h, tf15m, tf5m } = req.body;
-      const prompt = `You are a master crypto analyst specializing in short-term scalping. 
-      Analyze the following BTC/USDT price data from 3 short-term timeframes (1H, 15m, 5m).
-      Identify the top 3 strongest Support levels and top 3 strongest Resistance levels relevant for immediate day-trading/scalping.
-      
-      1H Data (Last 30): ${JSON.stringify(tf1h)}
-      15m Data (Last 30): ${JSON.stringify(tf15m)}
-      5m Data (Last 30): ${JSON.stringify(tf5m)}
-      
-      Return ONLY a JSON object with:
-      {
-        "supports": [price1, price2, price3],
-        "resistances": [price1, price2, price3]
-      }`;
-
-      const { text } = await callAIWithFallback(geminiKey, groqKey, prompt, true);
-      let result = JSON.parse(text || '{}');
-      res.json(result);
-    } catch (e: any) {
-      console.error(e);
-      res.status(500).json({ error: e.message });
-    }
-  });
-
-  app.post("/api/analyze", async (req, res) => {
-    const geminiKey = req.headers['x-gemini-key'] as string;
-    const groqKey = req.headers['x-groq-key'] as string;
-    
-    if (!geminiKey && !groqKey) return res.status(401).json({ error: "No keys provided" });
-    
-    try {
-      const { type, currentPrice, ema9, ema21, rsi, recentCandles, srLevels } = req.body;
-      
-      const prompt = `You are an expert crypto technical analyst and scalper.
-      The market for BTC/USDT has triggered a potential ${type} signal for a short-term trade.
-      Current Price: ${currentPrice}
-      EMA9: ${ema9}
-      EMA21: ${ema21}
-      RSI: ${rsi}
-      Key Support/Resistance Levels: ${JSON.stringify(srLevels)}
-      
-      Recent price action (last 5 candles):
-      ${JSON.stringify(recentCandles)}
-      
-      Analyze this data for a quick scalp. Only confirm if it's a high-probability trade (e.g. price is reacting well to a key local SR level).
-      Return a JSON object with:
-      {
-        "trade": true|false,
-        "type": "${type}",
-        "entryPrice": <suggested entry price around current price>,
-        "takeProfit": <suggested take profit for a scalp>,
-        "stopLoss": <suggested tight stop loss>,
-        "confidence": <integer 0-100>
-      }
-      Reply ONLY in valid JSON.`;
-
-      const { text } = await callAIWithFallback(geminiKey, groqKey, prompt, true);
-      let result = JSON.parse(text || '{}');
-      res.json(result);
-    } catch (e: any) {
-      console.error(e);
-      res.status(500).json({ error: e.message });
     }
   });
 

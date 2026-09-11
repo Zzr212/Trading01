@@ -13,7 +13,7 @@ export default function SentimentMeter({ sentimentScore }: Props) {
     <div className="flex flex-col gap-2 w-full pt-2">
       <div className="flex justify-between items-center px-1">
         <span className="text-xs font-bold tracking-widest text-red-500 uppercase">Sell</span>
-        <span className="text-[10px] font-medium text-neutral-500 uppercase">AI Market Sentiment</span>
+        <span className="text-[10px] font-medium text-neutral-500 uppercase">Algo Market Sentiment</span>
         <span className="text-xs font-bold tracking-widest text-green-500 uppercase">Buy</span>
       </div>
       

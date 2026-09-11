@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { Trade, AppError } from '../types';
-import { Clock, TrendingUp, TrendingDown, CheckCircle2, XCircle, Play, Trash2, Power, KeyRound } from 'lucide-react';
+import { Clock, TrendingUp, TrendingDown, CheckCircle2, XCircle, Play, Trash2, Power } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import SentimentMeter from './SentimentMeter';
 import TradeReplayModal from './TradeReplayModal';
@@ -8,8 +8,6 @@ import TradeReplayModal from './TradeReplayModal';
 type TabType = 'ACTIVE' | 'HISTORY' | 'ERRORS';
 
 interface Props {
-  aiAvailable?: boolean;
-  onOpenKeys?: () => void;
   activeTrade: Trade | null;
   history: Trade[];
   sentimentScore: number;
@@ -20,7 +18,7 @@ interface Props {
   onReboot: () => void;
 }
 
-export default function TradePanel({ aiAvailable, onOpenKeys, activeTrade, history, sentimentScore, errors, onClearErrors, activeTab, setActiveTab, onReboot }: Props) {
+export default function TradePanel({ activeTrade, history, sentimentScore, errors, onClearErrors, activeTab, setActiveTab, onReboot }: Props) {
   const [replayingTrade, setReplayingTrade] = useState<Trade | null>(null);
 
   const { wins, losses, winRate } = useMemo(() => {
@@ -93,7 +91,7 @@ export default function TradePanel({ aiAvailable, onOpenKeys, activeTrade, histo
             !activeTrade ? (
               <motion.div key="no-active" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="flex flex-col items-center justify-center h-40 text-neutral-500">
                 <div className="w-8 h-8 rounded-full border-2 border-neutral-800 border-t-neutral-500 animate-spin mb-3" />
-                <p className="text-sm font-medium">Scanning market via AI...</p>
+                <p className="text-sm font-medium">Scanning market via algorithm...</p>
               </motion.div>
             ) : (
               <TradeItem key={activeTrade.id} trade={activeTrade} />

@@ -1,31 +1,36 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Kline, Timeframe, Trade, SRLevels } from '../types';
 import { fetchHistoricalKlines } from '../lib/binance';
-import { calculateEMA, calculateRSI } from '../lib/indicators';
+import { calculateEMA, calculateRSI, calculateMACD, calculateATR, findSupportResistance } from '../lib/indicators';
 import CandlestickChart from './CandlestickChart';
 import { ChevronDown } from 'lucide-react';
 const TIMEFRAMES: Timeframe[] = ['1m', '5m', '15m', '30m', '1h', '1d', '1w', '1M'];
 interface Props {
-  geminiKey: string;
-  groqKey: string;
   activeTrade: Trade | null;
   onPriceUpdate: (price: number) => void;
   onSentimentUpdate: (score: number) => void;
   onTradeCreated: (trade: Trade) => void;
   onError: (msg: string) => void;
 }
-export default function ChartContainer({ geminiKey, groqKey, activeTrade, onPriceUpdate, onSentimentUpdate, onTradeCreated, onError }: Props) {
+export default function ChartContainer({ activeTrade, onPriceUpdate, onSentimentUpdate, onTradeCreated, onError }: Props) {
   const [data, setData] = useState<Kline[]>([]);
   const enrichedData = React.useMemo(() => {
     if (data.length === 0) return [];
     const ema9 = calculateEMA(data, 9);
     const ema21 = calculateEMA(data, 21);
     const rsiArray = calculateRSI(data, 14);
+    const atrArray = calculateATR(data, 14);
+    const macdData = calculateMACD(data);
+    
     return data.map((d, i) => ({
       ...d,
       ema9: ema9[i],
       ema21: ema21[i],
-      rsi: rsiArray[i]
+      rsi: rsiArray[i],
+      atr: atrArray[i],
+      macd: macdData.macd[i],
+      macdSignal: macdData.signal[i],
+      macdHist: macdData.hist[i]
     }));
   }, [data]);
   const [timeframe, setTimeframe] = useState<Timeframe>('1m');
@@ -38,36 +43,17 @@ export default function ChartContainer({ geminiKey, groqKey, activeTrade, onPric
 
   // Initial Multi-Timeframe S/R Analysis
   useEffect(() => {
-    if (!geminiKey && !groqKey) return;
     const fetchSR = async () => {
       try {
-        // Fetch shorter timeframes suitable for scalping
-        const [tf1h, tf15m, tf5m] = await Promise.all([
-          fetchHistoricalKlines('BTCUSDT', '1h', 30),
-          fetchHistoricalKlines('BTCUSDT', '15m', 30),
-          fetchHistoricalKlines('BTCUSDT', '5m', 30)
-        ]);
-        
-        const res = await fetch('/api/analyze-sr', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'x-gemini-key': geminiKey,
-          'x-groq-key': groqKey
-          },
-          body: JSON.stringify({ tf1h, tf15m, tf5m })
-        });
-        
-        const data = await res.json();
-        if (data.supports && data.resistances) {
-          setSrLevels(data);
-        }
+        const tf15m = await fetchHistoricalKlines('BTCUSDT', '15m', 100);
+        const sr = findSupportResistance(tf15m);
+        setSrLevels(sr);
       } catch (err: any) {
-        onError("Failed to fetch initial AI S/R levels: " + err.message);
+        onError("Failed to fetch S/R levels: " + err.message);
       }
     };
     fetchSR();
-  }, [geminiKey, groqKey, onError]);
+  }, [onError]);
 
   // Handle active trade recording (Tick by Tick)
   useEffect(() => {
@@ -188,98 +174,80 @@ export default function ChartContainer({ geminiKey, groqKey, activeTrade, onPric
   }, [timeframe, onError]);
 
 
+  // Algorithmic Trade Trigger Logic
   useEffect(() => {
-    if (enrichedData.length < 21) return;
+    if (enrichedData.length < 35) return;
     const current = enrichedData[enrichedData.length - 1];
     const prev = enrichedData[enrichedData.length - 2];
     
     onPriceUpdate(current.close);
 
-    let score = 50;
-    if (current.ema9 && current.ema21) {
-      if (current.ema9 > current.ema21) score += 20;
-      else score -= 20;
-    }
-    if (current.rsi) {
-      if (current.rsi > 50) score += (current.rsi - 50);
-      else score -= (50 - current.rsi);
-    }
-    onSentimentUpdate(Math.max(0, Math.min(100, score)));
+    if (activeTrade) return;
+    if (analyzingRef.current) return;
 
-    if (activeTrade || analyzingRef.current || !srLevels) return;
-
-    // Strict trigger for scalping: Price must be very close to a key support or resistance level (0.2% tolerance)
-    const isNearSupport = srLevels.supports.some(level => Math.abs(current.close - level) / level < 0.002);
-    const isNearResistance = srLevels.resistances.some(level => Math.abs(current.close - level) / level < 0.002);
+    // ALGORITHMIC SCALPING STRATEGY
+    // Trend: EMA9 & EMA21
+    // Momentum: MACD & RSI
+    // Volatility: ATR
     
-    if (!isNearSupport && !isNearResistance) return; // Stricter logic!
+    const isLongSetup = 
+      current.ema9 > current.ema21 && // Uptrend
+      prev.ema9 <= prev.ema21 && // Fresh crossover (or use MACD cross)
+      current.rsi > 40 && current.rsi < 70; // Healthy momentum
 
-    let signalType: 'LONG' | 'SHORT' | null = null;
+    const isShortSetup = 
+      current.ema9 < current.ema21 && // Downtrend
+      prev.ema9 >= prev.ema21 && // Fresh crossover
+      current.rsi < 60 && current.rsi > 30; // Healthy momentum
+      
+    // Alternate strategy: MACD Histogram crossover
+    const isMacdLong = current.macdHist > 0 && prev.macdHist <= 0 && current.ema9 > current.ema21;
+    const isMacdShort = current.macdHist < 0 && prev.macdHist >= 0 && current.ema9 < current.ema21;
     
-    if (current.ema9 && current.ema21 && prev.ema9 && prev.ema21) {
-      if (prev.ema9 <= prev.ema21 && current.ema9 > current.ema21 && current.rsi && current.rsi < 60 && isNearSupport) {
-        signalType = 'LONG';
-      }
-      else if (prev.ema9 >= prev.ema21 && current.ema9 < current.ema21 && current.rsi && current.rsi > 40 && isNearResistance) {
-        signalType = 'SHORT';
-      }
-    }
+    let signalType = null;
+    if (isLongSetup || isMacdLong) signalType = 'LONG';
+    if (isShortSetup || isMacdShort) signalType = 'SHORT';
 
-    if (signalType) {
-      analyzingRef.current = true;
-      const recentCandles = enrichedData.slice(-5).map(c => ({
-        close: c.close, volume: c.volume, ema9: c.ema9, ema21: c.ema21, rsi: c.rsi
-      }));
+    if (!signalType) return;
 
-      fetch('/api/analyze', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-gemini-key': geminiKey,
-          'x-groq-key': groqKey
-        },
-        body: JSON.stringify({
-          type: signalType,
-          currentPrice: current.close,
-          ema9: current.ema9,
-          ema21: current.ema21,
-          rsi: current.rsi,
-          srLevels,
-          recentCandles
-        })
-      })
-      .then(r => r.json())
-      .then(res => {
-        if (res.trade && res.entryPrice && res.takeProfit && res.stopLoss) {
-          const newTrade: Trade = {
-            id: Date.now().toString(),
-            pair: 'BTC/USDT',
-            type: res.type,
-            entryPrice: res.entryPrice,
-            takeProfit: res.takeProfit,
-            stopLoss: res.stopLoss,
-            status: 'ACTIVE',
-            timestamp: Date.now(),
-            confidence: res.confidence || 80
-          };
-          
-          fetch('/api/trades', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(newTrade)
-          }).then(() => {
-            onTradeCreated(newTrade);
-            // Pre-seed recording with context candles
-            recordedCandlesRef.current = enrichedData.slice(-50);
-          }).catch(e => onError("Failed to save trade: " + e.message));
-        }
-      })
-      .catch(e => onError("AI Analysis Error: " + e.message))
-      .finally(() => {
-        analyzingRef.current = false;
-      });
+    analyzingRef.current = true;
+    onSentimentUpdate(signalType === 'LONG' ? 85 : 15); // Set fake sentiment based on algo
+
+    // Calculate dynamic risk
+    const atr = current.atr || (current.close * 0.005);
+    const entryPrice = current.close;
+    
+    // Risk:Reward = 1:2
+    let stopLoss, takeProfit;
+    if (signalType === 'LONG') {
+      stopLoss = entryPrice - (atr * 1.5);
+      takeProfit = entryPrice + (atr * 3.0);
+    } else {
+      stopLoss = entryPrice + (atr * 1.5);
+      takeProfit = entryPrice - (atr * 3.0);
     }
-  }, [enrichedData, activeTrade, geminiKey, groqKey, srLevels, onPriceUpdate, onSentimentUpdate, onTradeCreated, onError]);
+    
+    const trade: Trade = {
+      id: Math.random().toString(36).substr(2, 9),
+      pair: 'BTCUSDT',
+      type: signalType as 'LONG' | 'SHORT',
+      entryPrice: parseFloat(entryPrice.toFixed(2)),
+      takeProfit: parseFloat(takeProfit.toFixed(2)),
+      stopLoss: parseFloat(stopLoss.toFixed(2)),
+      status: 'ACTIVE',
+      timestamp: Date.now(),
+      confidence: 80,
+      reason: `Algorithmic ${signalType} Signal based on EMA+MACD confluence. Volatility scaled targets using ATR.`,
+      result: 0
+    };
+    
+    onTradeCreated(trade);
+    
+    setTimeout(() => {
+      analyzingRef.current = false;
+    }, 5000); // Debounce
+    
+  }, [enrichedData, activeTrade, srLevels, onPriceUpdate, onSentimentUpdate, onTradeCreated, onError]);
 
   return (
     <div className="w-full h-full flex flex-col border-b border-neutral-900 bg-neutral-950">
