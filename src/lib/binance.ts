@@ -1,7 +1,10 @@
 import { Kline } from '../types';
 
-export async function fetchHistoricalKlines(symbol: string, interval: string, limit: number = 1000, endTime?: number): Promise<Kline[]> {
+export async function fetchHistoricalKlines(symbol: string, interval: string, limit: number = 1000, endTime?: number, startTime?: number): Promise<Kline[]> {
   let url = `https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=${interval}&limit=${Math.min(limit, 1000)}`;
+  if (startTime) {
+    url += `&startTime=${startTime}`;
+  }
   if (endTime) {
     url += `&endTime=${endTime}`;
   }

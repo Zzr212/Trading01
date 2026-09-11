@@ -14,6 +14,8 @@ export default function TradeReplayModal({ trade, onClose }: Props) {
   const [isPlaying, setIsPlaying] = useState(false);
   const [speed, setSpeed] = useState(1);
   const [currentIndex, setCurrentIndex] = useState(0);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
   const timerRef = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
@@ -26,28 +28,16 @@ export default function TradeReplayModal({ trade, onClose }: Props) {
           
           const builtFrames: Kline[][] = [];
           let currentFrame: Kline[] = [];
-
-          // Reconstruct the chart tick-by-tick to prevent "dots" issue
+          
+          // Since these are 1m closed candles from historical API, just add them one by one
           rawData.forEach(kline => {
-            if (currentFrame.length === 0) {
-              currentFrame.push(kline);
-            } else {
-              const last = currentFrame[currentFrame.length - 1];
-              if (kline.time === last.time) {
-                // Update the current candle with new tick data
-                currentFrame[currentFrame.length - 1] = kline;
-              } else if (kline.time > last.time) {
-                // Time shifted, new candle started
-                currentFrame.push(kline);
-              }
-            }
-            // Store a snapshot of the chart at this tick
+            currentFrame.push(kline);
             builtFrames.push([...currentFrame]);
           });
-
+          
           setFrames(builtFrames);
           
-          // Fast-forward through the 50 context candles to the exact moment the trade started
+          // Find the frame where the trade started
           let startIdx = 0;
           for (let i = 0; i < builtFrames.length; i++) {
             const frame = builtFrames[i];
@@ -56,13 +46,20 @@ export default function TradeReplayModal({ trade, onClose }: Props) {
               break;
             }
           }
-          if (startIdx === 0) startIdx = Math.min(49, builtFrames.length - 1);
-
+          
+          // If we can't find it exactly, or it's early, fallback to index 10 (as backend gives 10 prior)
+          if (startIdx === 0 && builtFrames.length > 10) startIdx = 10;
+          
           setCurrentIndex(startIdx);
           setVisibleCandles(builtFrames[startIdx].slice(-100)); // Show max 100 candles
+        } else {
+          setErrorMsg("Review data not found for this trade.");
         }
       })
-      .catch(console.error);
+      .catch(err => {
+        console.error(err);
+        setErrorMsg("Failed to load review data.");
+      });
   }, [trade]);
 
   const playStep = useCallback(() => {
@@ -79,8 +76,8 @@ export default function TradeReplayModal({ trade, onClose }: Props) {
 
   useEffect(() => {
     if (isPlaying) {
-      // 100ms base interval for tick playback
-      timerRef.current = setInterval(playStep, 100 / speed);
+      // 800ms base interval for candle playback
+      timerRef.current = setInterval(playStep, 800 / speed);
     } else if (timerRef.current) {
       clearInterval(timerRef.current);
     }
@@ -112,17 +109,21 @@ export default function TradeReplayModal({ trade, onClose }: Props) {
 
       {/* Chart */}
       <div className="flex-1 relative bg-neutral-950">
-        {frames.length > 0 ? (
+        {errorMsg ? (
+          <div className="flex items-center justify-center h-full text-red-500">
+            {errorMsg}
+          </div>
+        ) : frames.length > 0 ? (
           <CandlestickChart 
-            data={visibleCandles} 
-            timeframe="1m" 
-            activeTrade={trade} 
-            isReplay={true}
+             data={visibleCandles} 
+             timeframe="1m" 
+             activeTrade={trade} 
+             isReplay={true}
           />
         ) : (
           <div className="flex items-center justify-center h-full text-neutral-500">
             <div className="w-6 h-6 rounded-full border-2 border-neutral-800 border-t-neutral-500 animate-spin mr-3" />
-            Loading detailed tick replay...
+            Loading historical trade review...
           </div>
         )}
       </div>

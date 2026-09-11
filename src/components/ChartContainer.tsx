@@ -39,7 +39,7 @@ export default function ChartContainer({ activeTrade, onPriceUpdate, onSentiment
   const [srLevels, setSrLevels] = useState<SRLevels | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const analyzingRef = useRef(false);
-  const recordedCandlesRef = useRef<Kline[]>([]);
+
 
   // Initial Multi-Timeframe S/R Analysis
   useEffect(() => {
@@ -55,41 +55,7 @@ export default function ChartContainer({ activeTrade, onPriceUpdate, onSentiment
     fetchSR();
   }, [onError]);
 
-  // Handle active trade recording (Tick by Tick)
-  useEffect(() => {
-    if (activeTrade && enrichedData.length > 0) {
-      // Record every distinct tick (WS update) during the trade
-      const current = enrichedData[enrichedData.length - 1];
-      const lastRecorded = recordedCandlesRef.current[recordedCandlesRef.current.length - 1];
-      
-      if (!lastRecorded || lastRecorded !== current) {
-        recordedCandlesRef.current.push(current);
-      }
-    } else if (!activeTrade && recordedCandlesRef.current.length > 0) {
-      // Handled in next useEffect
-    }
-  }, [enrichedData, activeTrade]);
 
-  const lastActiveTradeIdRef = useRef<string | null>(null);
-  
-  useEffect(() => {
-    if (activeTrade) {
-      lastActiveTradeIdRef.current = activeTrade.id;
-    } else if (lastActiveTradeIdRef.current && recordedCandlesRef.current.length > 0) {
-      // Trade just ended! Let's save the review data.
-      fetch('/api/reviews', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          tradeId: lastActiveTradeIdRef.current,
-          candles: recordedCandlesRef.current
-        })
-      }).catch(e => onError("Failed to save trade review: " + e.message));
-      
-      lastActiveTradeIdRef.current = null;
-      recordedCandlesRef.current = []; // Clear for next trade
-    }
-  }, [activeTrade, onError]);
 
   useEffect(() => {
     let isMounted = true;
