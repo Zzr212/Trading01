@@ -34,6 +34,26 @@ async function startServer() {
   app.use(express.json({ limit: '50mb' }));
 
   // API Routes
+  app.get("/api/stats", (req, res) => {
+    try {
+      const stmt = db.prepare("SELECT pair, status, COUNT(*) as count FROM trades GROUP BY pair, status");
+      const rows = stmt.all() as any[];
+      
+      const stats: Record<string, { won: number, lost: number, active: number }> = {};
+      
+      rows.forEach(r => {
+        if (!stats[r.pair]) stats[r.pair] = { won: 0, lost: 0, active: 0 };
+        if (r.status === 'WON') stats[r.pair].won = r.count;
+        if (r.status === 'LOST') stats[r.pair].lost = r.count;
+        if (r.status === 'ACTIVE') stats[r.pair].active = r.count;
+      });
+      
+      res.json(stats);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   app.get("/api/trades", (req, res) => {
     try {
       const stmt = db.prepare("SELECT * FROM trades ORDER BY timestamp DESC");
@@ -76,11 +96,11 @@ async function startServer() {
         res.json({ success: true, candles: JSON.parse(row.candles) });
       } else {
         // Try to fetch dynamically
-        const tradeStmt = db.prepare("SELECT timestamp FROM trades WHERE id = ?");
+        const tradeStmt = db.prepare("SELECT timestamp, pair FROM trades WHERE id = ?");
         const trade = tradeStmt.get(req.params.tradeId) as any;
         if (trade) {
           const startTime = trade.timestamp - (10 * 60000);
-          const url = `https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=1m&limit=1000&startTime=${startTime}`;
+          const url = `https://api.binance.com/api/v3/klines?symbol=${trade.pair}&interval=1m&limit=1000&startTime=${startTime}`;
           const response = await fetch(url);
           const data = await response.json();
           if (Array.isArray(data)) {

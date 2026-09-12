@@ -6,13 +6,14 @@ import CandlestickChart from './CandlestickChart';
 import { ChevronDown } from 'lucide-react';
 const TIMEFRAMES: Timeframe[] = ['1m', '5m', '15m', '30m', '1h', '1d', '1w', '1M'];
 interface Props {
+  symbol: string;
   activeTrade: Trade | null;
   onPriceUpdate: (price: number) => void;
   onSentimentUpdate: (score: number) => void;
   onTradeCreated: (trade: Trade) => void;
   onError: (msg: string) => void;
 }
-export default function ChartContainer({ activeTrade, onPriceUpdate, onSentimentUpdate, onTradeCreated, onError }: Props) {
+export default function ChartContainer({ symbol, activeTrade, onPriceUpdate, onSentimentUpdate, onTradeCreated, onError }: Props) {
   const [data, setData] = useState<Kline[]>([]);
   const enrichedData = React.useMemo(() => {
     if (data.length === 0) return [];
@@ -45,7 +46,7 @@ export default function ChartContainer({ activeTrade, onPriceUpdate, onSentiment
   useEffect(() => {
     const fetchSR = async () => {
       try {
-        const tf15m = await fetchHistoricalKlines('BTCUSDT', '15m', 100);
+        const tf15m = await fetchHistoricalKlines(symbol, '15m', 100);
         const sr = findSupportResistance(tf15m);
         setSrLevels(sr);
       } catch (err: any) {
@@ -66,12 +67,12 @@ export default function ChartContainer({ activeTrade, onPriceUpdate, onSentiment
 
     const loadData = async () => {
       try {
-        const initialData = await fetchHistoricalKlines('BTCUSDT', timeframe, 1000);
+        const initialData = await fetchHistoricalKlines(symbol, timeframe, 1000);
         if (!isMounted) return;
         setData(initialData);
         setIsLoading(false);
 
-        const wsUrl = `wss://stream.binance.com:9443/ws/btcusdt@kline_${timeframe}`;
+        const wsUrl = `wss://stream.binance.com:9443/ws/${symbol.toLowerCase()}@kline_${timeframe}`;
         const ws = new WebSocket(wsUrl);
         wsRef.current = ws;
 
@@ -109,7 +110,7 @@ export default function ChartContainer({ activeTrade, onPriceUpdate, onSentiment
           for (let i = 0; i < 9; i++) {
             if (!isMounted) break;
             try {
-              const more = await fetchHistoricalKlines('BTCUSDT', timeframe, 1000, currentEarliest - 1);
+              const more = await fetchHistoricalKlines(symbol, timeframe, 1000, currentEarliest - 1);
               if (more.length === 0) break;
               currentEarliest = more[0].time;
               setData(prev => {
@@ -137,7 +138,7 @@ export default function ChartContainer({ activeTrade, onPriceUpdate, onSentiment
       isMounted = false;
       if (wsRef.current) wsRef.current.close();
     };
-  }, [timeframe, onError]);
+  }, [timeframe, onError, symbol]);
 
 
 

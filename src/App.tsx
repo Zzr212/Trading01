@@ -1,11 +1,23 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import ChartContainer from './components/ChartContainer';
 import TradePanel from './components/TradePanel';
+import Dashboard from './components/Dashboard';
 import { Trade, AppError } from './types';
+import { ArrowLeft } from 'lucide-react';
 
 type TabType = 'ACTIVE' | 'HISTORY' | 'ERRORS';
 
 export default function App() {
+  const [selectedPair, setSelectedPair] = useState<string | null>(null);
+
+  if (!selectedPair) {
+    return <Dashboard onSelectPair={setSelectedPair} />;
+  }
+
+  return <PairView pair={selectedPair} onBack={() => setSelectedPair(null)} />;
+}
+
+function PairView({ pair, onBack }: { pair: string, onBack: () => void }) {
   const [trades, setTrades] = useState<Trade[]>([]);
   const [errors, setErrors] = useState<AppError[]>([]);
   const [sentimentScore, setSentimentScore] = useState(50);
@@ -21,12 +33,13 @@ export default function App() {
       const res = await fetch('/api/trades');
       const data = await res.json();
       if (Array.isArray(data)) {
-        setTrades(data);
+        // Filter trades for this specific pair
+        setTrades(data.filter(t => t.pair === pair));
       }
     } catch (e: any) {
       addError("Failed to fetch trades: " + e.message);
     }
-  }, [addError]);
+  }, [addError, pair]);
 
   const handleReboot = async () => {
     if (!window.confirm("Are you sure you want to reboot? All history will be deleted.")) return;
@@ -46,16 +59,30 @@ export default function App() {
     return () => clearInterval(interval);
   }, [fetchTrades]);
 
-
   const activeTrade = trades.find(t => t.status === 'ACTIVE') || null;
   const historyTrades = trades.filter(t => t.status !== 'ACTIVE');
   const isHistoryTab = activeTab === 'HISTORY';
 
   return (
     <div className="h-[100dvh] w-full flex flex-col bg-neutral-950 font-sans selection:bg-blue-500/30 overflow-hidden relative">
+      {/* Top Header to go back */}
+      <div className="absolute top-4 left-4 z-50 flex items-center gap-4">
+        <button 
+          onClick={onBack}
+          className="flex items-center gap-2 bg-neutral-900/80 hover:bg-neutral-800 text-white px-4 py-2 rounded-full backdrop-blur-sm border border-neutral-800 transition-colors shadow-lg"
+        >
+          <ArrowLeft size={16} />
+          <span className="text-sm font-bold">Back</span>
+        </button>
+        <div className="px-4 py-2 bg-neutral-900/80 rounded-full border border-neutral-800 text-white font-bold backdrop-blur-sm shadow-lg">
+          {pair} - Trading View
+        </div>
+      </div>
+
       {/* Top Half - Chart (Dynamically sized) */}
       <div className={`transition-all duration-500 ease-in-out ${isHistoryTab ? 'h-[40%]' : 'h-[70%]'} min-h-0 relative`}>
         <ChartContainer 
+          symbol={pair}
           activeTrade={activeTrade}
           onPriceUpdate={setCurrentPrice}
           onSentimentUpdate={setSentimentScore}

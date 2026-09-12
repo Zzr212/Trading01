@@ -1,4 +1,6 @@
-import WebSocket from 'ws';
+import re
+
+bot_content = """import WebSocket from 'ws';
 import { DatabaseSync } from 'node:sqlite';
 import { Trade, Kline, SRLevels } from './src/types';
 import { calculateEMA, calculateRSI, calculateATR, calculateMACD, calculateVWAP } from './src/lib/indicators';
@@ -67,10 +69,10 @@ export class TradingBot {
       this.fundingRates[p] = 0; // Default neutral
       this.obImbalances[p] = 0.5; // Default neutral
     });
-    
+    this.init();
   }
 
-  public async start() {
+  private async init() {
     console.log("Fetching historical data for all pairs...");
     for (const p of PAIRS) {
       try {
@@ -376,3 +378,7 @@ export class TradingBot {
     }
   }
 }
+"""
+
+with open('bot.ts', 'w') as f:
+    f.write(bot_content)

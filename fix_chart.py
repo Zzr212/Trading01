@@ -1,40 +1,31 @@
 import re
 
-with open('src/components/CandlestickChart.tsx', 'r') as f:
+with open('src/components/ChartContainer.tsx', 'r') as f:
     content = f.read()
 
-old_block = """      // Keep historical view stable when new data arrives
-      if (prevDataLengthRef.current > 0 && data.length > prevDataLengthRef.current) {
-        const diff = data.length - prevDataLengthRef.current;
-        // If the user has scrolled into the past (offset > 0), increment offset to maintain their visual position
-        if (stateRef.current.offset > 0) {
-          stateRef.current.offset += diff;
-        }
-      }
-      prevDataLengthRef.current = data.length;
-    }
-    
-    requestAnimationFrame(draw);"""
+# Update Props
+content = content.replace("interface Props {", "interface Props {\n  symbol: string;")
 
-new_block = """      // Keep historical view stable when new data arrives
-      if (prevDataLengthRef.current > 0 && data.length > prevDataLengthRef.current && (data.length - prevDataLengthRef.current < 50)) {
-        const diff = data.length - prevDataLengthRef.current;
-        // If the user has scrolled into the past (offset > 0), increment offset to maintain their visual position
-        if (stateRef.current.offset > 0) {
-          stateRef.current.offset += diff;
-        }
-      } else if (prevDataLengthRef.current === 0 || Math.abs(data.length - prevDataLengthRef.current) > 50) {
-        // Data completely changed or first load, reset offset
-        stateRef.current.offset = isReplay ? 0 : -20;
-      }
-      prevDataLengthRef.current = data.length;
-    } else {
-      prevDataLengthRef.current = 0;
-    }
-    
-    requestAnimationFrame(draw);"""
+# Update initial fetch in ChartContainer
+content = content.replace("'BTCUSDT', timeframe, 1000", "symbol, timeframe, 1000")
+content = content.replace("'BTCUSDT', '15m', 100)", "symbol, '15m', 100)")
+content = content.replace("'BTCUSDT', timeframe, 1000, currentEarliest - 1)", "symbol, timeframe, 1000, currentEarliest - 1)")
 
-content = content.replace(old_block, new_block)
+# Update WS connection
+content = content.replace("wss://stream.binance.com:9443/ws/btcusdt@kline_${timeframe}", "wss://stream.binance.com:9443/ws/${symbol.toLowerCase()}@kline_${timeframe}")
 
-with open('src/components/CandlestickChart.tsx', 'w') as f:
+# Ensure we use `symbol` in dependencies for useEffects
+# For the main data fetch:
+effect1 = r"  }, \[timeframe, onError\]\);"
+content = re.sub(effect1, "  }, [timeframe, onError, symbol]);", content)
+
+# For the websocket:
+effect2 = r"  }, \[timeframe, analyzingRef\]\);"
+content = re.sub(effect2, "  }, [timeframe, analyzingRef, symbol]);", content)
+
+# Remove the 'btcusdt' string hardcode if any other left
+# Let's replace 'BTCUSDT' with symbol in any remaining places (except imports)
+# It's cleaner to just do that manually if needed
+
+with open('src/components/ChartContainer.tsx', 'w') as f:
     f.write(content)
