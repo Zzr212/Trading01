@@ -308,9 +308,8 @@ export class TradingBot {
     if (isShortSetup) signalType = 'SHORT';
 
     if (signalType && c_atr) {
-      // SLIPPAGE SIMULATION (0.05%)
-      const slippage = 0.0005;
-      const actualEntry = signalType === 'LONG' ? currentPrice * (1 + slippage) : currentPrice * (1 - slippage);
+      // Entry price is the exact market price at the moment signal triggers
+      const actualEntry = currentPrice;
       
       const features = [c_rsi, c_macd, currentPrice - c_ema9, currentPrice - c_ema21, signalType === 'LONG' ? 1 : 0, macroBullish ? 1 : 0];
       const aiConfidence = this.predictor.predict(features);

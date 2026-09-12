@@ -17,6 +17,7 @@ export default function TradeReplayModal({ trade, onClose }: Props) {
   const [currentIndex, setCurrentIndex] = useState(0);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
+  const [entryIdx, setEntryIdx] = useState<number>(0);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
@@ -30,7 +31,7 @@ export default function TradeReplayModal({ trade, onClose }: Props) {
           const builtFrames: Kline[][] = [];
           let currentFrame: Kline[] = [];
           
-          // Since these are 1m closed candles from historical API, just add them one by one
+          // Since these are 1m closed candles from historical API, add them one by one
           rawData.forEach(kline => {
             currentFrame.push(kline);
             builtFrames.push([...currentFrame]);
@@ -38,21 +39,33 @@ export default function TradeReplayModal({ trade, onClose }: Props) {
           
           setFrames(builtFrames);
           
-          // Find the frame where the trade started
-          let startIdx = 0;
-          for (let i = 0; i < builtFrames.length; i++) {
-            const frame = builtFrames[i];
-            if (frame[frame.length - 1].time >= trade.timestamp) {
+          // Find the exact candle where the trade started
+          let startIdx = -1;
+          for (let i = 0; i < rawData.length; i++) {
+            const k = rawData[i];
+            const nextTime = (i + 1 < rawData.length) ? rawData[i + 1].time : k.time + 60000;
+            if (trade.timestamp >= k.time && trade.timestamp < nextTime) {
               startIdx = i;
               break;
             }
           }
           
-          // If we can't find it exactly, or it's early, fallback to index 10 (as backend gives 10 prior)
-          if (startIdx === 0 && builtFrames.length > 10) startIdx = 10;
+          // If not found by range, find closest candle
+          if (startIdx === -1) {
+            let minDiff = Infinity;
+            rawData.forEach((k, i) => {
+              const diff = Math.abs(k.time - trade.timestamp);
+              if (diff < minDiff) {
+                minDiff = diff;
+                startIdx = i;
+              }
+            });
+          }
           
-          setCurrentIndex(startIdx);
-          setVisibleCandles(builtFrames[startIdx].slice(-100)); // Show max 100 candles
+          const finalStartIdx = Math.max(0, startIdx);
+          setEntryIdx(finalStartIdx);
+          setCurrentIndex(finalStartIdx);
+          setVisibleCandles(builtFrames[finalStartIdx].slice(-100)); // Show max 100 candles
         } else {
           setErrorMsg("Review data not found for this trade.");
         }
@@ -93,6 +106,22 @@ export default function TradeReplayModal({ trade, onClose }: Props) {
     setVisibleCandles(frames[val].slice(-100));
   };
 
+  const jumpToEntry = () => {
+    setCurrentIndex(entryIdx);
+    setVisibleCandles(frames[entryIdx].slice(-100));
+  };
+
+  // Dynamically compute trade state relative to replay playback position
+  const currentCandle = visibleCandles.length > 0 ? visibleCandles[visibleCandles.length - 1] : null;
+  const isAfterEntry = currentIndex >= entryIdx;
+  const isClosedAtCurrentTime = trade.closeTimestamp && currentCandle && currentCandle.time >= trade.closeTimestamp;
+
+  const currentReplayTrade = !isAfterEntry
+    ? null
+    : isClosedAtCurrentTime
+    ? trade
+    : { ...trade, status: 'ACTIVE' as const, closeTimestamp: undefined };
+
   const modalContent = (
     <div className="fixed inset-0 z-[100] bg-neutral-950 flex flex-col">
       {/* Header */}
@@ -118,7 +147,7 @@ export default function TradeReplayModal({ trade, onClose }: Props) {
           <CandlestickChart 
              data={visibleCandles} 
              timeframe="1m" 
-             activeTrade={trade} 
+             activeTrade={currentReplayTrade} 
              isReplay={true}
           />
         ) : (
@@ -130,8 +159,30 @@ export default function TradeReplayModal({ trade, onClose }: Props) {
       </div>
 
       {/* Controls */}
-      <div className="bg-neutral-900 p-6 border-t border-neutral-800 flex flex-col gap-4">
-        {/* Timeline Slider */}
+      <div className="bg-neutral-900 p-4 border-t border-neutral-800 flex flex-col gap-3">
+        {/* Timeline Slider with Status & Jump */}
+        <div className="flex items-center justify-between text-xs text-neutral-400">
+          <div className="flex items-center gap-2">
+            <span className={`px-2 py-0.5 rounded font-bold uppercase text-[10px] ${
+              !isAfterEntry
+                ? 'bg-neutral-800 text-neutral-400'
+                : isClosedAtCurrentTime
+                ? trade.status === 'WON' ? 'bg-green-950 text-green-400 border border-green-800' : 'bg-red-950 text-red-400 border border-red-800'
+                : 'bg-blue-950 text-blue-400 border border-blue-800 animate-pulse'
+            }`}>
+              {!isAfterEntry ? 'Pre-Entry' : isClosedAtCurrentTime ? `Closed: ${trade.status}` : 'Active Trade'}
+            </span>
+            <span>{currentCandle ? new Date(currentCandle.time).toLocaleTimeString() : ''}</span>
+          </div>
+
+          <button
+            onClick={jumpToEntry}
+            className="px-2.5 py-1 bg-neutral-800 hover:bg-neutral-700 text-sky-400 rounded text-xs font-medium transition-colors"
+          >
+            Jump to Entry
+          </button>
+        </div>
+
         <input 
           type="range" 
           min="0" 

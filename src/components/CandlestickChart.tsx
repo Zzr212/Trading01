@@ -17,7 +17,7 @@ export default function CandlestickChart({ symbol = 'BTCUSDT', data, timeframe, 
   
   // High-performance state stored in refs to avoid re-renders during interactions
   const stateRef = useRef({
-    offset: isReplay ? 0 : -20, // Negative offset allows space on the right side
+    offset: isReplay ? 0 : -8, // Default -8 candles offset for clean right-side breathing room
     zoom: 1,
     isDragging: false,
     lastX: 0,
@@ -38,6 +38,7 @@ export default function CandlestickChart({ symbol = 'BTCUSDT', data, timeframe, 
 
     const state = stateRef.current;
     const { width, height, offset, zoom } = state;
+    if (width <= 0 || height <= 0) return;
     
     // Support high DPI displays
     const dpr = window.devicePixelRatio || 1;
@@ -52,8 +53,8 @@ export default function CandlestickChart({ symbol = 'BTCUSDT', data, timeframe, 
     ctx.save();
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.font = '900 120px sans-serif';
-    ctx.fillStyle = 'rgba(255, 255, 255, 0.025)';
+    ctx.font = '900 100px sans-serif';
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.02)';
     ctx.fillText('TradingView', width / 2, height / 2);
     ctx.restore();
 
@@ -81,63 +82,23 @@ export default function CandlestickChart({ symbol = 'BTCUSDT', data, timeframe, 
     let finalMax = maxPrice;
     
     if (activeTrade) {
-      finalMin = Math.min(minPrice, activeTrade.stopLoss, activeTrade.takeProfit);
-      finalMax = Math.max(maxPrice, activeTrade.stopLoss, activeTrade.takeProfit);
+      finalMin = Math.min(minPrice, activeTrade.stopLoss, activeTrade.takeProfit, activeTrade.entryPrice);
+      finalMax = Math.max(maxPrice, activeTrade.stopLoss, activeTrade.takeProfit, activeTrade.entryPrice);
     }
     
     const priceRange = finalMax - finalMin || 1;
-    
-    const paddingY = height * 0.1;
+    const paddingY = height * 0.12;
     const drawableHeight = height - paddingY * 2;
     
     const getY = (price: number) => paddingY + drawableHeight - ((price - finalMin) / priceRange) * drawableHeight;
 
-    // 1. Draw Active Trade Overlay
-    if (activeTrade) {
-      const entryY = getY(activeTrade.entryPrice);
-      const tpY = getY(activeTrade.takeProfit);
-      const slY = getY(activeTrade.stopLoss);
-      
-      // Find X coordinate of the trade entry
-      let entryCandleIndex = data.length - 1;
-      for (let i = data.length - 1; i >= 0; i--) {
-        if (data[i].time <= activeTrade.timestamp) {
-          entryCandleIndex = i;
-          break;
-        }
-      }
-      
-      let startX = 0;
-      if (entryCandleIndex !== -1) {
-        const distanceFromRightEdge = (data.length - 1 - entryCandleIndex) - offset;
-        startX = width - (distanceFromRightEdge * candleTotalWidth) - candleTotalWidth / 2;
-      }
-      
-      // Draw zones starting from startX extending to the right edge (plus extra space)
-      ctx.globalAlpha = 0.15;
-      
-      // Profit Area (Green)
-      ctx.fillStyle = '#22c55e';
-      ctx.fillRect(startX, Math.min(entryY, tpY), width * 2, Math.abs(entryY - tpY));
-      
-      // Loss Area (Red)
-      ctx.fillStyle = '#ef4444';
-      ctx.fillRect(startX, Math.min(entryY, slY), width * 2, Math.abs(entryY - slY));
-      
-      ctx.globalAlpha = 1.0;
-      
-      // Entry Line
-      ctx.strokeStyle = '#3b82f6';
-      ctx.setLineDash([5, 5]);
-      ctx.beginPath();
-      ctx.moveTo(startX, entryY);
-      ctx.lineTo(width * 2, entryY);
-      ctx.stroke();
-      
-      ctx.setLineDash([]);
+    // Estimate candle interval in milliseconds from dataset
+    let intervalMs = 60 * 1000;
+    if (data.length > 1) {
+      intervalMs = Math.max(1000, data[1].time - data[0].time);
     }
 
-    // 2. Draw Grid Lines (horizontal)
+    // 1. Draw Grid Lines (horizontal)
     ctx.strokeStyle = '#262626'; // neutral-800
     ctx.lineWidth = 1;
     ctx.setLineDash([4, 4]);
@@ -152,12 +113,98 @@ export default function CandlestickChart({ symbol = 'BTCUSDT', data, timeframe, 
       
       ctx.beginPath();
       ctx.moveTo(0, y);
-      ctx.lineTo(width, y);
+      ctx.lineTo(width - 55, y); // Leave space for axis tags
       ctx.stroke();
       
       ctx.fillText(price.toFixed(2), width - 5, y - 5);
     }
     ctx.setLineDash([]);
+
+    // Calculate Trade Geometry
+    let tradeMetrics: {
+      startX: number;
+      endX: number;
+      entryY: number;
+      tpY: number;
+      slY: number;
+      isLong: boolean;
+      entryFound: boolean;
+    } | null = null;
+
+    if (activeTrade) {
+      const entryY = getY(activeTrade.entryPrice);
+      const tpY = getY(activeTrade.takeProfit);
+      const slY = getY(activeTrade.stopLoss);
+      const isLong = activeTrade.type === 'LONG';
+
+      // Find exact entry candle whose open-close window contains activeTrade.timestamp
+      let entryCandleIndex = -1;
+      for (let i = 0; i < data.length; i++) {
+        const cOpen = data[i].time;
+        const cClose = (i + 1 < data.length) ? data[i + 1].time : cOpen + intervalMs;
+        if (activeTrade.timestamp >= cOpen && activeTrade.timestamp < cClose) {
+          entryCandleIndex = i;
+          break;
+        }
+      }
+
+      const lastCandleX = width - (-offset * candleTotalWidth) - candleTotalWidth / 2;
+
+      let startX = 0;
+      let entryFound = false;
+
+      if (entryCandleIndex !== -1) {
+        entryFound = true;
+        const distanceFromRightEdge = (data.length - 1 - entryCandleIndex) - offset;
+        startX = width - (distanceFromRightEdge * candleTotalWidth) - candleTotalWidth / 2;
+      } else if (activeTrade.timestamp < data[0].time) {
+        // Trade started before currently loaded data
+        startX = 0;
+      } else {
+        // Trade timestamp is at or near the last candle
+        startX = lastCandleX;
+      }
+
+      // Find exit candle if trade is closed
+      let endX = width;
+      if (activeTrade.closeTimestamp && activeTrade.closeTimestamp >= activeTrade.timestamp) {
+        let exitCandleIndex = -1;
+        for (let i = 0; i < data.length; i++) {
+          const cOpen = data[i].time;
+          const cClose = (i + 1 < data.length) ? data[i + 1].time : cOpen + intervalMs;
+          if (activeTrade.closeTimestamp >= cOpen && activeTrade.closeTimestamp < cClose) {
+            exitCandleIndex = i;
+            break;
+          }
+        }
+        if (exitCandleIndex !== -1) {
+          const distFromRight = (data.length - 1 - exitCandleIndex) - offset;
+          endX = width - (distFromRight * candleTotalWidth) - candleTotalWidth / 2;
+        } else if (activeTrade.closeTimestamp < data[0].time) {
+          endX = 0;
+        } else {
+          endX = Math.max(startX + candleTotalWidth, lastCandleX);
+        }
+      } else {
+        // Active trade: extends from startX to last candle plus breathing room into offset space
+        endX = Math.max(startX + candleTotalWidth * 2, Math.min(width - 5, lastCandleX + candleTotalWidth * 4));
+      }
+
+      tradeMetrics = { startX, endX, entryY, tpY, slY, isLong, entryFound };
+
+      // 2. Draw Translucent Profit & Loss Areas (Background)
+      const boxWidth = Math.max(candleTotalWidth, endX - startX);
+      ctx.globalAlpha = 0.15;
+      
+      // Profit Area (Green)
+      ctx.fillStyle = '#22c55e';
+      ctx.fillRect(startX, Math.min(entryY, tpY), boxWidth, Math.abs(entryY - tpY));
+      
+      // Loss Area (Red)
+      ctx.fillStyle = '#ef4444';
+      ctx.fillRect(startX, Math.min(entryY, slY), boxWidth, Math.abs(entryY - slY));
+      ctx.globalAlpha = 1.0;
+    }
 
     // 3. Draw Candles
     visibleData.forEach((d, i) => {
@@ -224,6 +271,158 @@ export default function CandlestickChart({ symbol = 'BTCUSDT', data, timeframe, 
     });
     ctx.stroke();
 
+    // 5. Draw Trade Lines, Badges & Indicators (Foreground)
+    if (activeTrade && tradeMetrics) {
+      const { startX, endX, entryY, tpY, slY, isLong } = tradeMetrics;
+
+      // Take Profit Line (Dashed Green)
+      ctx.strokeStyle = '#22c55e';
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash([4, 4]);
+      ctx.beginPath();
+      ctx.moveTo(startX, tpY);
+      ctx.lineTo(endX, tpY);
+      ctx.stroke();
+
+      // Stop Loss Line (Dashed Red)
+      ctx.strokeStyle = '#ef4444';
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash([4, 4]);
+      ctx.beginPath();
+      ctx.moveTo(startX, slY);
+      ctx.lineTo(endX, slY);
+      ctx.stroke();
+
+      // Entry Line (Sharp Cyan/Blue)
+      ctx.strokeStyle = '#38bdf8'; // sky-400
+      ctx.lineWidth = 2;
+      ctx.setLineDash([6, 3]);
+      ctx.beginPath();
+      ctx.moveTo(startX, entryY);
+      ctx.lineTo(endX, entryY);
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      // Vertical guideline anchor at entry candle
+      ctx.strokeStyle = 'rgba(56, 189, 248, 0.4)';
+      ctx.lineWidth = 1;
+      ctx.setLineDash([2, 2]);
+      ctx.beginPath();
+      ctx.moveTo(startX, Math.min(entryY, tpY, slY) - 10);
+      ctx.lineTo(startX, Math.max(entryY, tpY, slY) + 10);
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      // Entry Pin Dot at (startX, entryY)
+      ctx.fillStyle = '#38bdf8';
+      ctx.beginPath();
+      ctx.arc(startX, entryY, 4, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = '#ffffff';
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+
+      // Entry Badge directly at the entry candle
+      const entryText = `${activeTrade.type} @ $${activeTrade.entryPrice.toFixed(2)}`;
+      ctx.font = 'bold 10px monospace';
+      const textW = ctx.measureText(entryText).width;
+      const badgeW = textW + 16;
+      const badgeH = 18;
+      const badgeY = isLong ? entryY + 8 : entryY - badgeH - 8;
+      const badgeX = Math.max(4, Math.min(width - badgeW - 60, startX - badgeW / 2));
+      const badgeColor = isLong ? '#22c55e' : '#ef4444';
+
+      ctx.fillStyle = 'rgba(10, 10, 10, 0.9)';
+      ctx.strokeStyle = badgeColor;
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.roundRect(badgeX, badgeY, badgeW, badgeH, 4);
+      ctx.fill();
+      ctx.stroke();
+
+      ctx.fillStyle = badgeColor;
+      ctx.textAlign = 'left';
+      ctx.fillText(`${isLong ? '▲' : '▼'} ${entryText}`, badgeX + 6, badgeY + 13);
+
+      // Exit Marker if trade is finished
+      if (activeTrade.status === 'WON' || activeTrade.status === 'LOST') {
+        const isWon = activeTrade.status === 'WON';
+        const exitColor = isWon ? '#22c55e' : '#ef4444';
+        const exitY = isWon ? tpY : slY;
+        const exitText = isWon ? '✓ TP HIT' : '✕ SL HIT';
+
+        ctx.fillStyle = exitColor;
+        ctx.beginPath();
+        ctx.arc(endX, exitY, 4.5, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+
+        ctx.font = 'bold 10px monospace';
+        const eTextW = ctx.measureText(exitText).width;
+        const eBadgeW = eTextW + 12;
+        const eBadgeH = 18;
+        const eBadgeY = isWon ? exitY - eBadgeH - 6 : exitY + 6;
+        const eBadgeX = Math.max(4, Math.min(width - eBadgeW - 60, endX - eBadgeW / 2));
+
+        ctx.fillStyle = 'rgba(10, 10, 10, 0.9)';
+        ctx.strokeStyle = exitColor;
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.roundRect(eBadgeX, eBadgeY, eBadgeW, eBadgeH, 4);
+        ctx.fill();
+        ctx.stroke();
+
+        ctx.fillStyle = exitColor;
+        ctx.textAlign = 'left';
+        ctx.fillText(exitText, eBadgeX + 6, eBadgeY + 13);
+      }
+
+      // 6. Right-Axis Price Pills for TP, Entry, SL
+      const drawAxisPill = (y: number, label: string, priceStr: string, bg: string, textCol: string = '#ffffff') => {
+        const labelText = `${label} ${priceStr}`;
+        ctx.font = 'bold 9px monospace';
+        const pillW = ctx.measureText(labelText).width + 10;
+        const pillH = 16;
+        const pillX = width - pillW - 2;
+        const pillY = y - pillH / 2;
+
+        ctx.fillStyle = bg;
+        ctx.beginPath();
+        ctx.roundRect(pillX, pillY, pillW, pillH, 3);
+        ctx.fill();
+
+        ctx.fillStyle = textCol;
+        ctx.textAlign = 'center';
+        ctx.fillText(labelText, pillX + pillW / 2, pillY + 11);
+      };
+
+      drawAxisPill(tpY, 'TP', `$${activeTrade.takeProfit.toFixed(2)}`, '#16a34a');
+      drawAxisPill(slY, 'SL', `$${activeTrade.stopLoss.toFixed(2)}`, '#dc2626');
+      drawAxisPill(entryY, 'ENTRY', `$${activeTrade.entryPrice.toFixed(2)}`, '#0284c7');
+    }
+
+    // Live Current Price Tag on Right Axis
+    if (currentPrice !== null) {
+      const curY = getY(currentPrice);
+      const curPriceStr = `$${currentPrice.toFixed(2)}`;
+      ctx.font = 'bold 10px monospace';
+      const curW = ctx.measureText(curPriceStr).width + 10;
+      const curH = 18;
+      const curX = width - curW - 2;
+      const curYPos = curY - curH / 2;
+
+      ctx.fillStyle = priceChange === 'up' ? '#22c55e' : '#ef4444';
+      ctx.beginPath();
+      ctx.roundRect(curX, curYPos, curW, curH, 3);
+      ctx.fill();
+
+      ctx.fillStyle = '#ffffff';
+      ctx.textAlign = 'center';
+      ctx.fillText(curPriceStr, curX + curW / 2, curYPos + 12);
+    }
+
   }, [data, activeTrade]);
 
   // Handle Resize
@@ -261,7 +460,8 @@ export default function CandlestickChart({ symbol = 'BTCUSDT', data, timeframe, 
         }
       } else if (prevDataLengthRef.current === 0 || Math.abs(data.length - prevDataLengthRef.current) > 50) {
         // Data completely changed or first load, reset offset
-        stateRef.current.offset = isReplay ? 0 : -20;
+        const defaultOffset = isReplay ? 0 : (stateRef.current.width > 640 ? -12 : -6);
+        stateRef.current.offset = defaultOffset;
       }
       prevDataLengthRef.current = data.length;
     } else {
