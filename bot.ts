@@ -219,8 +219,8 @@ export class TradingBot {
       }
       
       if (result) {
-        const updateStmt = this.db.prepare("UPDATE trades SET status = ? WHERE id = ?");
-        updateStmt.run(result, activeTrade.id);
+        const updateStmt = this.db.prepare("UPDATE trades SET status = ?, closeTimestamp = ? WHERE id = ?");
+        updateStmt.run(result, Date.now(), activeTrade.id);
         console.log(`Trade ${activeTrade.id} (${symbol}) Closed: ${result} at ${currentPrice}`);
         
         // Save Trade Review Asynchronously
@@ -368,7 +368,7 @@ export class TradingBot {
       this.activeTrades[symbol] = newTrade;
 
       const insertStmt = this.db.prepare(
-        "INSERT INTO trades VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
+        "INSERT INTO trades (id, pair, type, entryPrice, takeProfit, stopLoss, status, timestamp, confidence) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
       );
       insertStmt.run(newTrade.id, newTrade.pair, newTrade.type, newTrade.entryPrice, newTrade.takeProfit, newTrade.stopLoss, newTrade.status, newTrade.timestamp, newTrade.confidence);
       

@@ -106,6 +106,7 @@ export default function Dashboard({ onSelectPair }: Props) {
           <ResponsiveContainer width="100%" height="100%">
             <PieChart>
               <Pie
+                isAnimationActive={false}
                 data={displayDonutData}
                 innerRadius="75%"
                 outerRadius="100%"
@@ -179,7 +180,15 @@ export default function Dashboard({ onSelectPair }: Props) {
                      {pair.replace('USDT', '')}
                    </div>
                    <div>
-                     <div className="text-xl font-bold tracking-tight">{pair}</div>
+                     <div className="flex items-center gap-2">
+                       <div className="text-xl font-bold tracking-tight">{pair}</div>
+                       {pStats.active > 0 && (
+                         <div className="relative flex h-2.5 w-2.5" title="Active Trade Running">
+                           <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                           <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
+                         </div>
+                       )}
+                     </div>
                      <div className="text-sm text-neutral-500">Quantitative Algorithmic Trading</div>
                    </div>
                  </div>

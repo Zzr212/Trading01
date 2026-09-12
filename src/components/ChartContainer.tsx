@@ -190,7 +190,7 @@ export default function ChartContainer({ symbol, onBack, activeTrade, onPriceUpd
       )}
       
       <div className="flex-1 relative">
-        <CandlestickChart data={enrichedData} timeframe={timeframe} activeTrade={activeTrade} />
+        <CandlestickChart symbol={symbol} data={enrichedData} timeframe={timeframe} activeTrade={activeTrade} />
       </div>
     </div>
   );

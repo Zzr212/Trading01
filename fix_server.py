@@ -1,19 +1,38 @@
 import re
-
 with open('server.ts', 'r') as f:
     content = f.read()
 
-# Add import
-import_stmt = "import { TradingBot } from './bot';\n"
-content = content.replace('import { createServer as createViteServer } from "vite";', 'import { createServer as createViteServer } from "vite";\n' + import_stmt)
+# Update schema
+old_schema = '''db.exec(`CREATE TABLE IF NOT EXISTS trades (
+  id TEXT PRIMARY KEY,
+  pair TEXT,
+  type TEXT,
+  entryPrice REAL,
+  takeProfit REAL,
+  stopLoss REAL,
+  status TEXT,
+  timestamp INTEGER,
+  confidence INTEGER
+)`);'''
 
-# Start bot
-start_server = "async function startServer() {"
-start_bot = """async function startServer() {
-  const bot = new TradingBot(db);
-  bot.start();
-"""
-content = content.replace(start_server, start_bot)
+new_schema = '''db.exec(`CREATE TABLE IF NOT EXISTS trades (
+  id TEXT PRIMARY KEY,
+  pair TEXT,
+  type TEXT,
+  entryPrice REAL,
+  takeProfit REAL,
+  stopLoss REAL,
+  status TEXT,
+  timestamp INTEGER,
+  closeTimestamp INTEGER,
+  confidence INTEGER
+)`);
+
+try {
+  db.exec("ALTER TABLE trades ADD COLUMN closeTimestamp INTEGER;");
+} catch(e) {}'''
+
+content = content.replace(old_schema, new_schema)
 
 with open('server.ts', 'w') as f:
     f.write(content)

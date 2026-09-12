@@ -1,31 +1,22 @@
 import re
-
-with open('src/components/ChartContainer.tsx', 'r') as f:
+with open('src/components/CandlestickChart.tsx', 'r') as f:
     content = f.read()
 
-# Update Props
-content = content.replace("interface Props {", "interface Props {\n  symbol: string;")
+content = content.replace("interface ChartProps {\n  data: Kline[];", "interface ChartProps {\n  symbol?: string;\n  data: Kline[];")
+content = content.replace("export default function CandlestickChart({ data, timeframe, activeTrade, isReplay }: ChartProps) {", "export default function CandlestickChart({ symbol = 'BTCUSDT', data, timeframe, activeTrade, isReplay }: ChartProps) {")
 
-# Update initial fetch in ChartContainer
-content = content.replace("'BTCUSDT', timeframe, 1000", "symbol, timeframe, 1000")
-content = content.replace("'BTCUSDT', '15m', 100)", "symbol, '15m', 100)")
-content = content.replace("'BTCUSDT', timeframe, 1000, currentEarliest - 1)", "symbol, timeframe, 1000, currentEarliest - 1)")
+content = content.replace('<h1 className="text-xl font-bold tracking-tight text-white">BTC/USDT</h1>', '<h1 className="text-xl font-bold tracking-tight text-white">{symbol.replace("USDT", "/USDT")}</h1>')
 
-# Update WS connection
-content = content.replace("wss://stream.binance.com:9443/ws/btcusdt@kline_${timeframe}", "wss://stream.binance.com:9443/ws/${symbol.toLowerCase()}@kline_${timeframe}")
+# Fix entryCandleIndex logic
+old_entry_idx = 'const entryCandleIndex = data.findIndex(d => d.time >= activeTrade.timestamp);'
+new_entry_idx = '''let entryCandleIndex = data.length - 1;
+      for (let i = data.length - 1; i >= 0; i--) {
+        if (data[i].time <= activeTrade.timestamp) {
+          entryCandleIndex = i;
+          break;
+        }
+      }'''
+content = content.replace(old_entry_idx, new_entry_idx)
 
-# Ensure we use `symbol` in dependencies for useEffects
-# For the main data fetch:
-effect1 = r"  }, \[timeframe, onError\]\);"
-content = re.sub(effect1, "  }, [timeframe, onError, symbol]);", content)
-
-# For the websocket:
-effect2 = r"  }, \[timeframe, analyzingRef\]\);"
-content = re.sub(effect2, "  }, [timeframe, analyzingRef, symbol]);", content)
-
-# Remove the 'btcusdt' string hardcode if any other left
-# Let's replace 'BTCUSDT' with symbol in any remaining places (except imports)
-# It's cleaner to just do that manually if needed
-
-with open('src/components/ChartContainer.tsx', 'w') as f:
+with open('src/components/CandlestickChart.tsx', 'w') as f:
     f.write(content)

@@ -16,8 +16,13 @@ db.exec(`CREATE TABLE IF NOT EXISTS trades (
   stopLoss REAL,
   status TEXT,
   timestamp INTEGER,
+  closeTimestamp INTEGER,
   confidence INTEGER
 )`);
+
+try {
+  db.exec("ALTER TABLE trades ADD COLUMN closeTimestamp INTEGER;");
+} catch(e) {}
 
 db.exec(`CREATE TABLE IF NOT EXISTS trade_reviews (
   tradeId TEXT PRIMARY KEY,

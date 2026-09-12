@@ -2,13 +2,14 @@ import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { Kline, Trade } from '../types';
 
 interface ChartProps {
+  symbol?: string;
   data: Kline[];
   timeframe: string;
   activeTrade?: Trade | null;
   isReplay?: boolean;
 }
 
-export default function CandlestickChart({ data, timeframe, activeTrade, isReplay }: ChartProps) {
+export default function CandlestickChart({ symbol = 'BTCUSDT', data, timeframe, activeTrade, isReplay }: ChartProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [currentPrice, setCurrentPrice] = useState<number | null>(null);
@@ -98,7 +99,13 @@ export default function CandlestickChart({ data, timeframe, activeTrade, isRepla
       const slY = getY(activeTrade.stopLoss);
       
       // Find X coordinate of the trade entry
-      const entryCandleIndex = data.findIndex(d => d.time >= activeTrade.timestamp);
+      let entryCandleIndex = data.length - 1;
+      for (let i = data.length - 1; i >= 0; i--) {
+        if (data[i].time <= activeTrade.timestamp) {
+          entryCandleIndex = i;
+          break;
+        }
+      }
       
       let startX = 0;
       if (entryCandleIndex !== -1) {
@@ -374,7 +381,7 @@ export default function CandlestickChart({ data, timeframe, activeTrade, isRepla
       {currentPrice !== null && (
         <div className="absolute top-4 left-4 z-10 flex flex-col items-start gap-1 pointer-events-none">
           <div className="flex items-center gap-2">
-            <h1 className="text-xl font-bold tracking-tight text-white">BTC/USDT</h1>
+            <h1 className="text-xl font-bold tracking-tight text-white">{symbol.replace("USDT", "/USDT")}</h1>
             <span className="px-1.5 py-0.5 rounded text-xs font-semibold bg-neutral-800 text-neutral-400">{timeframe}</span>
           </div>
           <div className="text-2xl font-light text-white font-mono flex items-center">

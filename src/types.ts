@@ -27,6 +27,7 @@ export interface Trade {
   stopLoss: number;
   status: TradeStatus;
   timestamp: number;
+  closeTimestamp?: number;
   confidence: number;
 }
 
