@@ -65,23 +65,11 @@ function PairView({ pair, onBack }: { pair: string, onBack: () => void }) {
 
   return (
     <div className="h-[100dvh] w-full flex flex-col bg-neutral-950 font-sans selection:bg-blue-500/30 overflow-hidden relative">
-      {/* Top Header to go back */}
-      <div className="absolute top-4 left-4 z-50 flex items-center gap-4">
-        <button 
-          onClick={onBack}
-          className="flex items-center gap-2 bg-neutral-900/80 hover:bg-neutral-800 text-white px-4 py-2 rounded-full backdrop-blur-sm border border-neutral-800 transition-colors shadow-lg"
-        >
-          <ArrowLeft size={16} />
-          <span className="text-sm font-bold">Back</span>
-        </button>
-        <div className="px-4 py-2 bg-neutral-900/80 rounded-full border border-neutral-800 text-white font-bold backdrop-blur-sm shadow-lg">
-          {pair} - Trading View
-        </div>
-      </div>
 
       {/* Top Half - Chart (Dynamically sized) */}
       <div className={`transition-all duration-500 ease-in-out ${isHistoryTab ? 'h-[40%]' : 'h-[70%]'} min-h-0 relative`}>
         <ChartContainer 
+          onBack={onBack}
           symbol={pair}
           activeTrade={activeTrade}
           onPriceUpdate={setCurrentPrice}

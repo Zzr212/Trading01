@@ -3,17 +3,18 @@ import { Kline, Timeframe, Trade, SRLevels } from '../types';
 import { fetchHistoricalKlines } from '../lib/binance';
 import { calculateEMA, calculateRSI, calculateMACD, calculateATR, findSupportResistance } from '../lib/indicators';
 import CandlestickChart from './CandlestickChart';
-import { ChevronDown } from 'lucide-react';
+import { ChevronDown, Home } from 'lucide-react';
 const TIMEFRAMES: Timeframe[] = ['1m', '5m', '15m', '30m', '1h', '1d', '1w', '1M'];
 interface Props {
   symbol: string;
+  onBack: () => void;
   activeTrade: Trade | null;
   onPriceUpdate: (price: number) => void;
   onSentimentUpdate: (score: number) => void;
   onTradeCreated: (trade: Trade) => void;
   onError: (msg: string) => void;
 }
-export default function ChartContainer({ symbol, activeTrade, onPriceUpdate, onSentimentUpdate, onTradeCreated, onError }: Props) {
+export default function ChartContainer({ symbol, onBack, activeTrade, onPriceUpdate, onSentimentUpdate, onTradeCreated, onError }: Props) {
   const [data, setData] = useState<Kline[]>([]);
   const enrichedData = React.useMemo(() => {
     if (data.length === 0) return [];
@@ -145,7 +146,14 @@ export default function ChartContainer({ symbol, activeTrade, onPriceUpdate, onS
 
   return (
     <div className="w-full h-full flex flex-col border-b border-neutral-900 bg-neutral-950">
-      <div className="absolute top-4 right-4 z-20">
+      <div className="absolute top-4 right-4 z-20 flex items-center gap-2">
+        <button 
+          onClick={onBack}
+          title="Back to Dashboard"
+          className="flex items-center justify-center p-1.5 bg-neutral-900/80 backdrop-blur-sm border border-neutral-800 rounded-md text-neutral-400 hover:text-white hover:bg-neutral-800 transition-colors"
+        >
+          <Home size={18} />
+        </button>
         <button
           onClick={() => setIsDropdownOpen(!isDropdownOpen)}
           className="flex items-center gap-2 px-3 py-1.5 bg-neutral-900/80 backdrop-blur-sm border border-neutral-800 rounded-md text-sm font-semibold text-neutral-200 hover:bg-neutral-800 transition-colors"

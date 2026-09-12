@@ -98,11 +98,11 @@ export default function Dashboard({ onSelectPair }: Props) {
   const totalWins = donutData.reduce((acc, curr) => acc + curr.value, 0);
 
   return (
-    <div className="h-[100dvh] w-full bg-neutral-950 flex flex-col font-sans overflow-hidden text-white">
+    <div className="min-h-[100dvh] w-full bg-neutral-950 flex flex-col font-sans text-white">
       {/* Top 35% - Statistics */}
-      <div className="h-[35%] w-full border-b border-neutral-900 flex items-center p-6 bg-neutral-950 shadow-md z-10 relative">
+      <div className="w-full border-b border-neutral-900 flex flex-col lg:flex-row items-center p-4 lg:p-8 bg-neutral-950/80 backdrop-blur-xl shadow-lg z-10 relative">
         {/* Left Side: Donut Chart */}
-        <div className="h-full w-1/3 flex items-center justify-center relative">
+        <div className="h-64 lg:h-80 w-full lg:w-1/3 flex items-center justify-center relative mb-6 lg:mb-0">
           <ResponsiveContainer width="100%" height="100%">
             <PieChart>
               <Pie
@@ -134,8 +134,8 @@ export default function Dashboard({ onSelectPair }: Props) {
         </div>
 
         {/* Right Side: Pair Summary (2 rows) */}
-        <div className="h-full w-2/3 pl-8 flex items-center">
-          <div className="grid grid-cols-3 gap-6 w-full">
+        <div className="w-full lg:w-2/3 lg:pl-10 flex items-center">
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-4 lg:gap-6 w-full">
             {PAIRS.map(pair => {
               const pStats = stats[pair] || { won: 0, lost: 0 };
               const total = pStats.won + pStats.lost;
@@ -159,7 +159,7 @@ export default function Dashboard({ onSelectPair }: Props) {
       </div>
 
       {/* Bottom 65% - List of Pairs */}
-      <div className="flex-1 w-full bg-neutral-950 overflow-y-auto p-6">
+      <div className="flex-1 w-full max-w-7xl mx-auto bg-neutral-950 p-4 lg:p-8">
         <h2 className="text-lg font-bold mb-4 text-neutral-400">Market Pairs</h2>
         <div className="grid gap-3">
           {PAIRS.map(pair => {
@@ -172,9 +172,9 @@ export default function Dashboard({ onSelectPair }: Props) {
                <div 
                  key={pair} 
                  onClick={() => onSelectPair(pair)}
-                 className="group flex items-center justify-between p-5 rounded-2xl bg-neutral-900 border border-neutral-800 hover:border-blue-500/50 cursor-pointer transition-all hover:bg-neutral-800/80 hover:shadow-[0_0_20px_rgba(59,130,246,0.1)]"
+                 className="group flex flex-col sm:flex-row sm:items-center justify-between p-4 lg:p-5 rounded-2xl bg-neutral-900/60 border border-neutral-800 hover:border-blue-500/50 cursor-pointer transition-all hover:bg-neutral-800 hover:shadow-[0_8px_30px_rgba(59,130,246,0.1)]"
                >
-                 <div className="flex items-center gap-4">
+                 <div className="flex items-center gap-4 mb-4 sm:mb-0">
                    <div className="w-12 h-12 rounded-full flex items-center justify-center font-bold text-sm shadow-inner" style={{ backgroundColor: `${COLORS[pair]}15`, color: COLORS[pair], border: `1px solid ${COLORS[pair]}40` }}>
                      {pair.replace('USDT', '')}
                    </div>
@@ -184,7 +184,7 @@ export default function Dashboard({ onSelectPair }: Props) {
                    </div>
                  </div>
                  
-                 <div className="flex items-center gap-12">
+                 <div className="flex items-center justify-between sm:justify-end sm:gap-12 w-full sm:w-auto border-t sm:border-t-0 border-neutral-800/50 pt-4 sm:pt-0">
                    <div className="text-right">
                      <div className="text-sm text-neutral-500 mb-1">Win Rate</div>
                      <div className="font-mono flex items-center gap-2">

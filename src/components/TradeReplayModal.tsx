@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useRef, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import { Trade, Kline } from '../types';
 import CandlestickChart from './CandlestickChart';
 import { X, Play, Pause, FastForward, Rewind } from 'lucide-react';
@@ -92,8 +93,8 @@ export default function TradeReplayModal({ trade, onClose }: Props) {
     setVisibleCandles(frames[val].slice(-100));
   };
 
-  return (
-    <div className="fixed inset-0 z-50 bg-neutral-950 flex flex-col">
+  const modalContent = (
+    <div className="fixed inset-0 z-[100] bg-neutral-950 flex flex-col">
       {/* Header */}
       <div className="flex items-center justify-between p-4 bg-neutral-900 border-b border-neutral-800">
         <div>
@@ -170,4 +171,6 @@ export default function TradeReplayModal({ trade, onClose }: Props) {
       </div>
     </div>
   );
+
+  return createPortal(modalContent, document.body);
 }

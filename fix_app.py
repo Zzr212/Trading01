@@ -3,17 +3,13 @@ import re
 with open('src/App.tsx', 'r') as f:
     content = f.read()
 
-old_onTradeCreated = "          onTradeCreated={(t) => setTrades(prev => [t, ...prev])}"
-new_onTradeCreated = """          onTradeCreated={(t) => {
-            setTrades(prev => [t, ...prev]);
-            fetch('/api/trades', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify(t)
-            }).catch(e => addError("Failed to save trade: " + e.message));
-          }}"""
+# Remove the Top Header
+top_header = r"      \{\/\* Top Header to go back \*\/\}.*?<\/div>"
+content = re.sub(top_header, "", content, flags=re.DOTALL)
 
-content = content.replace(old_onTradeCreated, new_onTradeCreated)
+# Add onBack prop to ChartContainer
+chart_container = r"<ChartContainer\s+symbol=\{pair\}"
+content = re.sub(chart_container, "<ChartContainer \n          onBack={onBack}\n          symbol={pair}", content)
 
 with open('src/App.tsx', 'w') as f:
     f.write(content)

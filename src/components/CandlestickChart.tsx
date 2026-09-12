@@ -47,6 +47,15 @@ export default function CandlestickChart({ data, timeframe, activeTrade, isRepla
     // Clear canvas
     ctx.clearRect(0, 0, width, height);
 
+    // Draw Watermark
+    ctx.save();
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.font = '900 120px sans-serif';
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.025)';
+    ctx.fillText('TradingView', width / 2, height / 2);
+    ctx.restore();
+
     const candleTotalWidth = BASE_CANDLE_WIDTH * zoom;
     const candleSpacing = candleTotalWidth * CANDLE_SPACING_RATIO;
     const candleWidth = candleTotalWidth - candleSpacing;
