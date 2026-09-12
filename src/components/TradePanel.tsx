@@ -4,8 +4,9 @@ import { Clock, TrendingUp, TrendingDown, CheckCircle2, XCircle, Play, Trash2, P
 import { motion, AnimatePresence } from 'motion/react';
 import SentimentMeter from './SentimentMeter';
 import TradeReplayModal from './TradeReplayModal';
+import OrderBook from './OrderBook';
 
-type TabType = 'ACTIVE' | 'HISTORY' | 'ERRORS';
+type TabType = 'ACTIVE' | 'HISTORY' | 'ORDER BOOK' | 'ERRORS';
 
 interface Props {
   activePair: string;
@@ -52,7 +53,7 @@ export default function TradePanel({ activePair, activeTrade, history, sentiment
       {/* Tab Navigation */}
       <div className="flex px-4 pt-4 border-b border-neutral-900 gap-8 justify-between items-center">
         <div className="flex gap-8">
-          {(['ACTIVE', 'HISTORY'] as const).map(tab => (
+          {(['ACTIVE', 'HISTORY', 'ORDER BOOK'] as const).map(tab => (
             <button
               key={tab}
               onClick={() => setActiveTab(tab)}
@@ -149,6 +150,11 @@ export default function TradePanel({ activePair, activeTrade, history, sentiment
                   </div>
                 ))}
               </div>
+            </motion.div>
+          )}
+                  {activeTab === 'ORDER BOOK' && (
+            <motion.div key="orderbook-view" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="h-64 sm:h-full">
+              <OrderBook symbol={activePair} />
             </motion.div>
           )}
         </AnimatePresence>
