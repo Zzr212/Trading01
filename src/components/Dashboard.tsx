@@ -98,7 +98,7 @@ export default function Dashboard({ onSelectPair }: Props) {
   const totalWins = donutData.reduce((acc, curr) => acc + curr.value, 0);
 
   return (
-    <div className="min-h-[100dvh] w-full bg-neutral-950 flex flex-col font-sans text-white">
+    <div className="h-[100dvh] w-full bg-neutral-950 flex flex-col font-sans text-white overflow-y-auto">
       {/* Top 35% - Statistics */}
       <div className="w-full border-b border-neutral-900 flex flex-col lg:flex-row items-center p-4 lg:p-8 bg-neutral-950/80 backdrop-blur-xl shadow-lg z-10 relative">
         {/* Left Side: Donut Chart */}
