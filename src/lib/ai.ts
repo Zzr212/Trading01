@@ -78,6 +78,16 @@ export class TradePredictor {
     console.log(`[TF.js] AI Model updated. Memory size: ${this.trainingData.length} trades.`);
   }
 
+  public getStatus() {
+    return {
+      status: this.isTrained ? 'ACTIVE' : 'INITIALIZING',
+      backend: tf.getBackend(),
+      memorySize: this.trainingData.length,
+      layers: this.model.layers.length,
+      isTrained: this.isTrained,
+    };
+  }
+
   public predict(features: number[]): number {
     if (!this.isTrained) return 50; 
     try {

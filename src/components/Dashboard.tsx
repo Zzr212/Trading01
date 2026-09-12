@@ -1,4 +1,6 @@
 import React, { useEffect, useState, useMemo } from 'react';
+import { Activity } from 'lucide-react';
+import SystemDiagnosticsModal from './SystemDiagnosticsModal';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from 'recharts';
 
 interface PairStats {
@@ -27,6 +29,7 @@ interface Props {
 export default function Dashboard({ onSelectPair }: Props) {
   const [stats, setStats] = useState<Record<string, {won: number, lost: number, active: number}>>({});
   const [prices, setPrices] = useState<Record<string, number>>({});
+  const [showDiagnostics, setShowDiagnostics] = useState<boolean>(false);
 
   useEffect(() => {
     // Fetch stats
@@ -101,6 +104,22 @@ export default function Dashboard({ onSelectPair }: Props) {
     <div className="h-[100dvh] w-full bg-neutral-950 flex flex-col font-sans text-white overflow-y-auto">
       {/* Top 35% - Statistics */}
       <div className="w-full border-b border-neutral-900 flex flex-col lg:flex-row items-center p-4 lg:p-8 bg-neutral-950/80 backdrop-blur-xl shadow-lg z-10 relative">
+        {/* Top-Right System Diagnostics Trigger */}
+        <div className="absolute top-4 right-4 z-20">
+          <button
+            onClick={() => setShowDiagnostics(true)}
+            className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-neutral-900/90 hover:bg-neutral-800 border border-neutral-800 hover:border-neutral-700 text-neutral-300 hover:text-white transition-all text-xs font-medium shadow-lg group backdrop-blur-md cursor-pointer"
+            title="Sistemska provjera rada svih komponenti bota i AI modela"
+          >
+            <span className="relative flex h-2 w-2">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+              <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+            </span>
+            <Activity size={14} className="text-neutral-400 group-hover:text-emerald-400 transition-colors" />
+            <span className="font-mono text-[11px] tracking-wide hidden sm:inline">SYSTEM DIAGNOSTICS</span>
+            <span className="font-mono text-[11px] tracking-wide sm:hidden">SYSTEM</span>
+          </button>
+        </div>
         {/* Left Side: Donut Chart */}
         <div className="h-64 lg:h-80 w-full lg:w-1/3 flex items-center justify-center relative mb-6 lg:mb-0">
           <ResponsiveContainer width="100%" height="100%">
@@ -218,6 +237,11 @@ export default function Dashboard({ onSelectPair }: Props) {
           })}
         </div>
       </div>
+      {/* Diagnostics Modal */}
+      <SystemDiagnosticsModal
+        isOpen={showDiagnostics}
+        onClose={() => setShowDiagnostics(false)}
+      />
     </div>
   );
 }

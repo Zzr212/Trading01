@@ -391,6 +391,26 @@ export class TradingBot {
       insertStmt.run(newTrade.id, newTrade.pair, newTrade.type, newTrade.entryPrice, newTrade.takeProfit, newTrade.stopLoss, newTrade.status, newTrade.timestamp, newTrade.confidence, JSON.stringify(newTrade.aiFeatures));
       
       console.log(`[Quant V2] New Trade: ${newTrade.pair} ${newTrade.type} @ ${newTrade.entryPrice}. SL: ${newTrade.stopLoss}, TP: ${newTrade.takeProfit}`);
-    }
+        }
+  }
+
+  public getDiagnostics() {
+    const wsConnected = !!this.ws && this.ws.readyState === WebSocket.OPEN;
+    const activeTradesList = Object.entries(this.activeTrades)
+      .filter(([_, t]) => t !== null)
+      .map(([pair, t]) => ({ pair, type: t!.type, entryPrice: t!.entryPrice }));
+
+    return {
+      botStatus: 'ONLINE',
+      wsStatus: wsConnected ? 'CONNECTED' : 'CONNECTING',
+      monitoredPairs: PAIRS,
+      activeTradesCount: activeTradesList.length,
+      activeTrades: activeTradesList,
+      fundingRates: this.fundingRates,
+      orderBookImbalances: this.obImbalances,
+      aiModel: this.predictor.getStatus(),
+      uptimeSeconds: Math.floor(process.uptime()),
+      heapUsedMb: Math.round(process.memoryUsage().heapUsed / 1024 / 1024)
+    };
   }
 }
