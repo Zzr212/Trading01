@@ -169,6 +169,9 @@ async function startServer() {
     const distPath = path.join(process.cwd(), "dist");
     app.use(express.static(distPath));
     app.get("*all", (req, res) => {
+      if (req.path.startsWith("/assets/") || req.path.match(/\.(js|css|map|png|svg|ico)$/)) {
+        return res.status(404).send("Not found");
+      }
       res.sendFile(path.join(distPath, "index.html"));
     });
   }
