@@ -8,6 +8,7 @@ import TradeReplayModal from './TradeReplayModal';
 type TabType = 'ACTIVE' | 'HISTORY' | 'ERRORS';
 
 interface Props {
+  activePair: string;
   activeTrade: Trade | null;
   history: Trade[];
   sentimentScore: number;
@@ -18,7 +19,7 @@ interface Props {
   onReboot: () => void;
 }
 
-export default function TradePanel({ activeTrade, history, sentimentScore, errors, onClearErrors, activeTab, setActiveTab, onReboot }: Props) {
+export default function TradePanel({ activePair, activeTrade, history, sentimentScore, errors, onClearErrors, activeTab, setActiveTab, onReboot }: Props) {
   const [replayingTrade, setReplayingTrade] = useState<Trade | null>(null);
 
   const { wins, losses, winRate } = useMemo(() => {
@@ -168,7 +169,7 @@ function formatTime(ts: number) {
   return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 }
 
-function TradeItem({ trade, onReview }: { trade: Trade; onReview?: () => void }) {
+function TradeItem({ trade, onReview }: { trade: Trade; onReview?: () => void; key?: string | number }) {
   const isLong = trade.type === 'LONG';
   
   const durationMs = trade.closeTimestamp ? (trade.closeTimestamp - trade.timestamp) : null;

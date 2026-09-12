@@ -3,6 +3,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { Trade, Kline, SRLevels } from './src/types';
 import { calculateEMA, calculateRSI, calculateATR, calculateMACD, calculateVWAP } from './src/lib/indicators';
 import { fetchHistoricalKlines } from './src/lib/binance';
+import { TradePredictor } from './src/lib/ai';
 
 // VPVR Calculation
 export function calculateVPVR(klines: Kline[], bins: number = 50) {
@@ -57,8 +58,10 @@ export class TradingBot {
   
   private fundingRates: Record<string, number> = {};
   private obImbalances: Record<string, number> = {};
+  private predictor: TradePredictor;
   
   constructor(db: DatabaseSync) {
+    this.predictor = new TradePredictor();
     this.db = db;
     PAIRS.forEach(p => {
       this.data5m[p] = [];
@@ -83,7 +86,7 @@ export class TradingBot {
     
     // Load active trades from DB
     const stmt = this.db.prepare("SELECT * FROM trades WHERE status = 'ACTIVE'");
-    const rows = stmt.all() as Trade[];
+    const rows = stmt.all() as unknown as Trade[];
     rows.forEach(r => {
       if (PAIRS.includes(r.pair)) {
         this.activeTrades[r.pair] = r;
@@ -223,6 +226,10 @@ export class TradingBot {
         updateStmt.run(result, Date.now(), activeTrade.id);
         console.log(`Trade ${activeTrade.id} (${symbol}) Closed: ${result} at ${currentPrice}`);
         
+        if (activeTrade.aiFeatures) {
+          this.predictor.recordResultAndTrain(activeTrade.aiFeatures, result);
+        }
+        
         // Save Trade Review Asynchronously
         const closedTradeId = activeTrade.id;
         const startTime = activeTrade.timestamp - (10 * 60000); 
@@ -250,8 +257,8 @@ export class TradingBot {
     const ema50_15m = calculateEMA(data15m, 50);
     const last_ema21_15m = ema21_15m[ema21_15m.length - 1];
     const last_ema50_15m = ema50_15m[ema50_15m.length - 1];
-    const macroBullish = last_ema21_15m > last_ema50_15m;
-    const macroBearish = last_ema21_15m < last_ema50_15m;
+    const macroBullish = last_ema21_15m > last_ema50_15m && currentPrice > last_ema21_15m;
+    const macroBearish = last_ema21_15m < last_ema50_15m && currentPrice < last_ema21_15m;
 
     const ema9 = calculateEMA(data5m, 9);
     const ema21 = calculateEMA(data5m, 21);
@@ -301,6 +308,16 @@ export class TradingBot {
     if (isShortSetup) signalType = 'SHORT';
 
     if (signalType && c_atr) {
+      // SLIPPAGE SIMULATION (0.05%)
+      const slippage = 0.0005;
+      const actualEntry = signalType === 'LONG' ? currentPrice * (1 + slippage) : currentPrice * (1 - slippage);
+      
+      const features = [c_rsi, c_macd, currentPrice - c_ema9, currentPrice - c_ema21, signalType === 'LONG' ? 1 : 0, macroBullish ? 1 : 0];
+      const aiConfidence = this.predictor.predict(features);
+
+      // Require AI confidence to be > 40 to enter trade, otherwise skip
+      if (aiConfidence < 40) return;
+
       const srLevels = findSupportResistance(data15m);
       const vpvr = calculateVPVR(data15m, 50);
       const topNodes = vpvr.slice(0, 3).map(n => n.price);
@@ -311,66 +328,67 @@ export class TradingBot {
       // Dynamic spacing based on pair price to make reasonable SL/TP distances
       // A generic approach: use ATR heavily instead of fixed 200/600 constraints
       if (signalType === 'LONG') {
-        const validSupports = srLevels.supports.filter(s => s < currentPrice);
-        let closestSupport = validSupports.length > 0 ? Math.max(...validSupports) : currentPrice - (c_atr * 2);
+        const validSupports = srLevels.supports.filter(s => s < actualEntry);
+        let closestSupport = validSupports.length > 0 ? Math.max(...validSupports) : actualEntry - (c_atr * 2);
         
-        let slDistance = currentPrice - closestSupport;
+        let slDistance = actualEntry - closestSupport;
         slDistance = Math.max(c_atr, Math.min(c_atr * 3, slDistance)); // Dynamic constraint
-        stopLoss = currentPrice - slDistance;
+        stopLoss = actualEntry - slDistance;
 
-        const validResistances = srLevels.resistances.filter(r => r > currentPrice);
-        let closestResistance = validResistances.length > 0 ? Math.min(...validResistances) : currentPrice + (slDistance * 2);
+        const validResistances = srLevels.resistances.filter(r => r > actualEntry);
+        let closestResistance = validResistances.length > 0 ? Math.min(...validResistances) : actualEntry + (slDistance * 2);
         
-        const nodesAbove = topNodes.filter(n => n > currentPrice);
+        const nodesAbove = topNodes.filter(n => n > actualEntry);
         if (nodesAbove.length) {
-          const pocDistance = Math.min(...nodesAbove) - currentPrice;
+          const pocDistance = Math.min(...nodesAbove) - actualEntry;
           if (pocDistance > slDistance) closestResistance = Math.min(...nodesAbove);
         }
         
-        let tpDistance = closestResistance - currentPrice;
-        tpDistance = Math.max(slDistance * 1.5, Math.min(slDistance * 3, tpDistance));
-        takeProfit = currentPrice + tpDistance;
+        let tpDistance = closestResistance - actualEntry;
+        const minProfitable = actualEntry * 0.0025; tpDistance = Math.max(slDistance * 1.5, Math.max(minProfitable, Math.min(slDistance * 3, tpDistance)));
+        takeProfit = actualEntry + tpDistance;
 
       } else {
-        const validResistances = srLevels.resistances.filter(r => r > currentPrice);
-        let closestResistance = validResistances.length > 0 ? Math.min(...validResistances) : currentPrice + (c_atr * 2);
+        const validResistances = srLevels.resistances.filter(r => r > actualEntry);
+        let closestResistance = validResistances.length > 0 ? Math.min(...validResistances) : actualEntry + (c_atr * 2);
         
-        let slDistance = closestResistance - currentPrice;
+        let slDistance = closestResistance - actualEntry;
         slDistance = Math.max(c_atr, Math.min(c_atr * 3, slDistance));
-        stopLoss = currentPrice + slDistance;
+        stopLoss = actualEntry + slDistance;
 
-        const validSupports = srLevels.supports.filter(s => s < currentPrice);
-        let closestSupport = validSupports.length > 0 ? Math.max(...validSupports) : currentPrice - (slDistance * 2);
+        const validSupports = srLevels.supports.filter(s => s < actualEntry);
+        let closestSupport = validSupports.length > 0 ? Math.max(...validSupports) : actualEntry - (slDistance * 2);
         
-        const nodesBelow = topNodes.filter(n => n < currentPrice);
+        const nodesBelow = topNodes.filter(n => n < actualEntry);
         if (nodesBelow.length) {
-          const pocDistance = currentPrice - Math.max(...nodesBelow);
+          const pocDistance = actualEntry - Math.max(...nodesBelow);
           if (pocDistance > slDistance) closestSupport = Math.max(...nodesBelow);
         }
 
-        let tpDistance = currentPrice - closestSupport;
-        tpDistance = Math.max(slDistance * 1.5, Math.min(slDistance * 3, tpDistance));
-        takeProfit = currentPrice - tpDistance;
+        let tpDistance = actualEntry - closestSupport;
+        const minProfitable = actualEntry * 0.0025; tpDistance = Math.max(slDistance * 1.5, Math.max(minProfitable, Math.min(slDistance * 3, tpDistance)));
+        takeProfit = actualEntry - tpDistance;
       }
 
       const newTrade: Trade = {
         id: Math.random().toString(36).substr(2, 9),
         pair: symbol,
         type: signalType as 'LONG' | 'SHORT',
-        entryPrice: parseFloat(currentPrice.toFixed(4)),
+        entryPrice: parseFloat(actualEntry.toFixed(4)),
         takeProfit: parseFloat(takeProfit.toFixed(4)),
         stopLoss: parseFloat(stopLoss.toFixed(4)),
         status: 'ACTIVE',
         timestamp: Date.now(),
-        confidence: 95,
+        confidence: aiConfidence,
+        aiFeatures: features
       };
       
       this.activeTrades[symbol] = newTrade;
 
       const insertStmt = this.db.prepare(
-        "INSERT INTO trades (id, pair, type, entryPrice, takeProfit, stopLoss, status, timestamp, confidence) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
+        "INSERT INTO trades (id, pair, type, entryPrice, takeProfit, stopLoss, status, timestamp, confidence, aiFeatures) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
       );
-      insertStmt.run(newTrade.id, newTrade.pair, newTrade.type, newTrade.entryPrice, newTrade.takeProfit, newTrade.stopLoss, newTrade.status, newTrade.timestamp, newTrade.confidence);
+      insertStmt.run(newTrade.id, newTrade.pair, newTrade.type, newTrade.entryPrice, newTrade.takeProfit, newTrade.stopLoss, newTrade.status, newTrade.timestamp, newTrade.confidence, JSON.stringify(newTrade.aiFeatures));
       
       console.log(`[Quant V2] New Trade: ${newTrade.pair} ${newTrade.type} @ ${newTrade.entryPrice}. SL: ${newTrade.stopLoss}, TP: ${newTrade.takeProfit}`);
     }

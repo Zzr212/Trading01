@@ -5,7 +5,7 @@ import Dashboard from './components/Dashboard';
 import { Trade, AppError } from './types';
 import { ArrowLeft } from 'lucide-react';
 
-type TabType = 'ACTIVE' | 'HISTORY' | 'ERRORS';
+type TabType = 'ACTIVE' | 'HISTORY' | 'ERRORS' | 'ORDER BOOK';
 
 export default function App() {
   const [selectedPair, setSelectedPair] = useState<string | null>(null);
@@ -88,7 +88,7 @@ function PairView({ pair, onBack }: { pair: string, onBack: () => void }) {
       
       {/* Bottom Half - TA Suggestions & History (Dynamically sized) */}
       <div className={`transition-all duration-500 ease-in-out ${isHistoryTab ? 'h-[60%]' : 'h-[30%]'} min-h-0 border-t-2 border-neutral-900 shadow-[0_-8px_30px_rgba(0,0,0,0.5)] z-10 relative`}>
-        <TradePanel 
+        <TradePanel activePair={activePair} 
           activeTrade={activeTrade} 
           history={historyTrades}
           sentimentScore={sentimentScore}

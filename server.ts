@@ -17,8 +17,13 @@ db.exec(`CREATE TABLE IF NOT EXISTS trades (
   status TEXT,
   timestamp INTEGER,
   closeTimestamp INTEGER,
-  confidence INTEGER
+  confidence INTEGER,
+  aiFeatures TEXT
 )`);
+
+try {
+  db.exec("ALTER TABLE trades ADD COLUMN aiFeatures TEXT;");
+} catch(e) {}
 
 try {
   db.exec("ALTER TABLE trades ADD COLUMN closeTimestamp INTEGER;");

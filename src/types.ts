@@ -29,6 +29,7 @@ export interface Trade {
   timestamp: number;
   closeTimestamp?: number;
   confidence: number;
+  aiFeatures?: number[];
 }
 
 export interface AppError {
