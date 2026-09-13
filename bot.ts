@@ -64,6 +64,7 @@ export class TradingBot {
   
   private data5m: Record<string, Kline[]> = {};
   private data15m: Record<string, Kline[]> = {};
+  private data1h: Record<string, Kline[]> = {};
   private activeTrades: Record<string, Trade | null> = {};
   private pairCooldowns: Record<string, number> = {};
   
@@ -77,6 +78,7 @@ export class TradingBot {
     PAIRS.forEach(p => {
       this.data5m[p] = [];
       this.data15m[p] = [];
+      this.data1h[p] = [];
       this.activeTrades[p] = null;
       this.pairCooldowns[p] = 0;
       this.fundingRates[p] = 0; // Default neutral
@@ -85,11 +87,12 @@ export class TradingBot {
   }
 
   public async start() {
-    console.log("Fetching historical data for all pairs...");
+    console.log("Fetching historical data (5m, 15m, 1h) for all pairs...");
     for (const p of PAIRS) {
       try {
         this.data5m[p] = await fetchHistoricalKlines(p, '5m', 150);
         this.data15m[p] = await fetchHistoricalKlines(p, '15m', 150);
+        this.data1h[p] = await fetchHistoricalKlines(p, '1h', 100);
       } catch (err) {
         console.error(`Failed to fetch history for ${p}:`, err);
       }
@@ -158,7 +161,7 @@ export class TradingBot {
   }
 
   private connectWebsocket() {
-    const streams = PAIRS.map(p => `${p.toLowerCase()}@kline_5m/${p.toLowerCase()}@kline_15m`).join('/');
+    const streams = PAIRS.map(p => `${p.toLowerCase()}@kline_5m/${p.toLowerCase()}@kline_15m/${p.toLowerCase()}@kline_1h`).join('/');
     this.ws = new WebSocket(`wss://stream.binance.com:9443/stream?streams=${streams}`);
 
     this.ws.on('message', (data: Buffer) => {
@@ -195,6 +198,8 @@ export class TradingBot {
           }
         } else if (interval === '15m') {
           this.updateDataArray(this.data15m[symbol], formattedKline);
+        } else if (interval === '1h') {
+          this.updateDataArray(this.data1h[symbol], formattedKline);
         }
 
       } catch (err) {
@@ -383,10 +388,28 @@ export class TradingBot {
 
     const data5m = this.data5m[symbol];
     const data15m = this.data15m[symbol];
+    const data1h = this.data1h[symbol];
     
     if (data5m.length < 50 || data15m.length < 50) return;
 
-    // 3. BTC MASTER TREND GUARD (Crypto Benchmark)
+    // 3. 1-HOUR (1H) HIGHER TIMEFRAME ANCHOR TREND FILTER
+    // The supreme trend judge: Never fight the 1-hour macro trend direction
+    let anchor1hBullish = true;
+    let anchor1hBearish = true;
+    if (data1h && data1h.length >= 25) {
+      const ema50_1h = calculateEMA(data1h, 50);
+      const ema20_1h = calculateEMA(data1h, 20);
+      const lastEma50_1h = ema50_1h[ema50_1h.length - 1];
+      const lastEma20_1h = ema20_1h[ema20_1h.length - 1];
+      const lastClose1h = data1h[data1h.length - 1].close;
+
+      // 1h Uptrend: Price above 50 EMA on 1h, or 20 EMA > 50 EMA
+      anchor1hBullish = lastClose1h >= lastEma50_1h || lastEma20_1h >= lastEma50_1h;
+      // 1h Downtrend: Price below 50 EMA on 1h, or 20 EMA < 50 EMA
+      anchor1hBearish = lastClose1h <= lastEma50_1h || lastEma20_1h <= lastEma50_1h;
+    }
+
+    // 4. BTC MASTER TREND GUARD (Crypto Benchmark)
     // If evaluating an altcoin (ETH, SOL, BNB, XRP, DOGE), align with Bitcoin macro trend
     let btcBullish = true;
     if (symbol !== 'BTCUSDT') {
@@ -399,11 +422,11 @@ export class TradingBot {
       }
     }
 
-    // 4. VOLUME SPIKE & EXHAUSTION FILTER
+    // 5. VOLUME SPIKE & EXHAUSTION FILTER
     // Avoid entering at the tip of institutional liquidity grabs / exhaustion climaxes
     const volExhaustion = detectVolumeExhaustion(data5m, 20);
 
-    // 5. SESSION & TIME FILTER
+    // 6. SESSION & TIME FILTER
     const sessionInfo = getTradingSessionInfo();
 
     // Macro Trend (15m timeframe)
@@ -459,6 +482,17 @@ export class TradingBot {
 
     let isLongSetup = isUptrend && validLongRsi && (isMacdBullishCross || isEmaBullishCross);
     let isShortSetup = isDowntrend && validShortRsi && (isMacdBearishCross || isEmaBearishCross);
+
+    // Apply 1-Hour Higher Timeframe Anchor Trend Filter
+    // Strictly forbid LONGs if 1h is in a clear downtrend, and forbid SHORTs if 1h is in a clear uptrend!
+    if (isLongSetup && !anchor1hBullish) {
+      console.log(`[1H Macro Guard] ${symbol} LONG setup blocked: 1-Hour chart is Bearish / below 50 EMA.`);
+      isLongSetup = false;
+    }
+    if (isShortSetup && !anchor1hBearish) {
+      console.log(`[1H Macro Guard] ${symbol} SHORT setup blocked: 1-Hour chart is Bullish / above 50 EMA.`);
+      isShortSetup = false;
+    }
 
     // Apply BTC Master Guard: Never buy an altcoin if BTC is Bearish, never short if BTC is Bullish
     if (symbol !== 'BTCUSDT') {
@@ -642,6 +676,7 @@ export class TradingBot {
       tradingSession: sessionInfo.session,
       sessionHighLiquidity: sessionInfo.isHighLiquidity,
       monitoredPairs: PAIRS,
+      timeframes: ['5m (Execution)', '15m (Momentum)', '1h (Anchor Macro Trend)'],
       maxConcurrentTrades: 2,
       activeTradesCount: activeTradesList.length,
       activeTrades: activeTradesList,

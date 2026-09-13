@@ -28,6 +28,7 @@ interface SystemHealthData {
   tradingSession?: string;
   sessionHighLiquidity?: boolean;
   monitoredPairs: string[];
+  timeframes?: string[];
   maxConcurrentTrades?: number;
   activeTradesCount: number;
   activeTrades: Array<{ pair: string; type: string; entryPrice: number; stopLoss?: number; takeProfit?: number; tp1Price?: number; tp1Hit?: boolean }>;
@@ -330,6 +331,14 @@ export default function SystemDiagnosticsModal({ isOpen, onClose }: Props) {
                   <div className="flex justify-between text-neutral-400">
                     <span>Active Positions:</span>
                     <span className="text-white font-medium">{data?.activeTradesCount || 0} / {data?.maxConcurrentTrades || 2} Max</span>
+                  </div>
+                  <div className="flex justify-between text-neutral-400">
+                    <span>Timeframe Confluence:</span>
+                    <span className="text-emerald-400 font-mono">5m + 15m + 1h (Anchor)</span>
+                  </div>
+                  <div className="flex justify-between text-neutral-400">
+                    <span>1H Macro Guard:</span>
+                    <span className="text-emerald-400">50 EMA Trend Filter</span>
                   </div>
                   <div className="flex justify-between text-neutral-400">
                     <span>Market Session:</span>
