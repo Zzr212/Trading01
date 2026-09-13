@@ -15,12 +15,12 @@ const COLORS: Record<string, string> = {
   'BTCUSDT': '#F7931A',
   'ETHUSDT': '#627EEA',
   'SOLUSDT': '#14F195',
+  'BNBUSDT': '#F3BA2F',
   'XRPUSDT': '#1E88E5',
-  'EURUSDT': '#003399',
-  'PAXGUSDT': '#FFD700'
+  'DOGEUSDT': '#C2A633'
 };
 
-const PAIRS = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'XRPUSDT', 'EURUSDT', 'PAXGUSDT'];
+const PAIRS = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT', 'XRPUSDT', 'DOGEUSDT'];
 
 interface Props {
   onSelectPair: (pair: string) => void;

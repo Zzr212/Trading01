@@ -28,6 +28,7 @@ interface SystemHealthData {
   monitoredPairs: string[];
   activeTradesCount: number;
   activeTrades: Array<{ pair: string; type: string; entryPrice: number }>;
+  cooldowns?: Record<string, number>;
   fundingRates: Record<string, number>;
   orderBookImbalances: Record<string, number>;
   aiModel: {
@@ -332,13 +333,25 @@ export default function SystemDiagnosticsModal({ isOpen, onClose }: Props) {
                     <span className="text-white">{data?.activeTradesCount || 0} Open</span>
                   </div>
                   <div className="flex justify-between text-neutral-400">
-                    <span>Slippage Factor:</span>
-                    <span className="text-neutral-300">0.05% Applied</span>
+                    <span>Anti-Chop Filter:</span>
+                    <span className="text-emerald-400">ADX (≥22 Trend Confirmed)</span>
                   </div>
                   <div className="flex justify-between text-neutral-400">
-                    <span>Fee Buffer:</span>
-                    <span className="text-neutral-300">Min 0.25% TP</span>
+                    <span>Signal Execution:</span>
+                    <span className="text-emerald-400">Candle Close (kline.x)</span>
                   </div>
+                  <div className="flex justify-between text-neutral-400">
+                    <span>Loss Protection:</span>
+                    <span className="text-emerald-400">Break-Even & 35m Cooldown</span>
+                  </div>
+                  {data?.cooldowns && Object.keys(data.cooldowns).length > 0 && (
+                    <div className="flex justify-between text-amber-400 pt-1 border-t border-neutral-800/60">
+                      <span>Loss Cooldown:</span>
+                      <span>
+                        {Object.entries(data.cooldowns).map(([p, s]) => `${p} (${Math.ceil(Number(s) / 60)}m)`).join(', ')}
+                      </span>
+                    </div>
+                  )}
                   <div className="flex justify-between text-neutral-400">
                     <span>Process Node.js:</span>
                     <span className="text-emerald-400 flex items-center gap-1">

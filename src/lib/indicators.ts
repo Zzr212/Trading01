@@ -207,3 +207,98 @@ export function calculateVPVR(data: Kline[], bins: number = 50): { price: number
 
   return profile.sort((a, b) => b.volume - a.volume);
 }
+
+// Average Directional Index (ADX) with +DI and -DI (Wilder's Smoothing)
+export function calculateADX(data: Kline[], period: number = 14): { adx: number[], pDi: number[], mDi: number[] } {
+  const len = data.length;
+  const adx = new Array(len).fill(null);
+  const pDi = new Array(len).fill(null);
+  const mDi = new Array(len).fill(null);
+
+  if (len < period * 2) {
+    return { adx, pDi, mDi };
+  }
+
+  const tr: number[] = new Array(len).fill(0);
+  const pDm: number[] = new Array(len).fill(0);
+  const mDm: number[] = new Array(len).fill(0);
+
+  for (let i = 1; i < len; i++) {
+    const high = data[i].high;
+    const low = data[i].low;
+    const prevClose = data[i - 1].close;
+    const prevHigh = data[i - 1].high;
+    const prevLow = data[i - 1].low;
+
+    tr[i] = Math.max(
+      high - low,
+      Math.abs(high - prevClose),
+      Math.abs(low - prevClose)
+    );
+
+    const upMove = high - prevHigh;
+    const downMove = prevLow - low;
+
+    pDm[i] = (upMove > downMove && upMove > 0) ? upMove : 0;
+    mDm[i] = (downMove > upMove && downMove > 0) ? downMove : 0;
+  }
+
+  // Initial sum for Wilder's smoothing
+  let trSmooth = 0;
+  let pDmSmooth = 0;
+  let mDmSmooth = 0;
+
+  for (let i = 1; i <= period; i++) {
+    trSmooth += tr[i];
+    pDmSmooth += pDm[i];
+    mDmSmooth += mDm[i];
+  }
+
+  const dx: number[] = new Array(len).fill(null);
+
+  if (trSmooth > 0) {
+    const initialPDi = (pDmSmooth / trSmooth) * 100;
+    const initialMDi = (mDmSmooth / trSmooth) * 100;
+    pDi[period] = initialPDi;
+    mDi[period] = initialMDi;
+    const diSum = initialPDi + initialMDi;
+    dx[period] = diSum > 0 ? (Math.abs(initialPDi - initialMDi) / diSum) * 100 : 0;
+  }
+
+  for (let i = period + 1; i < len; i++) {
+    trSmooth = trSmooth - (trSmooth / period) + tr[i];
+    pDmSmooth = pDmSmooth - (pDmSmooth / period) + pDm[i];
+    mDmSmooth = mDmSmooth - (mDmSmooth / period) + mDm[i];
+
+    if (trSmooth > 0) {
+      const curPDi = (pDmSmooth / trSmooth) * 100;
+      const curMDi = (mDmSmooth / trSmooth) * 100;
+      pDi[i] = curPDi;
+      mDi[i] = curMDi;
+
+      const diSum = curPDi + curMDi;
+      dx[i] = diSum > 0 ? (Math.abs(curPDi - curMDi) / diSum) * 100 : 0;
+    }
+  }
+
+  // Calculate ADX from DX using Wilder's smoothing
+  let dxStart = period;
+  while (dxStart < len && dx[dxStart] === null) dxStart++;
+
+  if (dxStart + period <= len) {
+    let dxSum = 0;
+    for (let i = dxStart; i < dxStart + period; i++) {
+      dxSum += dx[i];
+    }
+    let adxSmooth = dxSum / period;
+    adx[dxStart + period - 1] = adxSmooth;
+
+    for (let i = dxStart + period; i < len; i++) {
+      adxSmooth = (adxSmooth * (period - 1) + dx[i]) / period;
+      adx[i] = adxSmooth;
+    }
+  }
+
+  return { adx, pDi, mDi };
+}
+
