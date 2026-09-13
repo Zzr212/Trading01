@@ -1,7 +1,16 @@
 import WebSocket from 'ws';
 import { DatabaseSync } from 'node:sqlite';
 import { Trade, Kline, SRLevels } from './src/types';
-import { calculateEMA, calculateRSI, calculateATR, calculateMACD, calculateVWAP, calculateADX } from './src/lib/indicators';
+import { 
+  calculateEMA, 
+  calculateRSI, 
+  calculateATR, 
+  calculateMACD, 
+  calculateVWAP, 
+  calculateADX,
+  detectVolumeExhaustion,
+  getTradingSessionInfo
+} from './src/lib/indicators';
 import { fetchHistoricalKlines } from './src/lib/binance';
 import { TradePredictor } from './src/lib/ai';
 
@@ -213,26 +222,71 @@ export class TradingBot {
     }
   }
 
-  // Manage Active Trade: SL / TP check, Dynamic Break-Even, and Trailing Stop
+  // Manage Active Trade: Dynamic TP1 (Partial Profit), Break-Even, Trailing Stop, and TP2
   private manageActiveTrade(symbol: string, currentPrice: number) {
     const activeTrade = this.activeTrades[symbol];
     if (!activeTrade) return;
 
+    // --- 1. DYNAMIC TP1 PARTIAL PROFIT CHECK ---
+    if (!activeTrade.tp1Hit && activeTrade.tp1Price) {
+      const tp1Reached = activeTrade.type === 'LONG' 
+        ? currentPrice >= activeTrade.tp1Price 
+        : currentPrice <= activeTrade.tp1Price;
+
+      if (tp1Reached) {
+        activeTrade.tp1Hit = true;
+        // Lock in Break-Even immediately upon securing TP1
+        activeTrade.stopLoss = activeTrade.entryPrice;
+        
+        try {
+          this.db.prepare("UPDATE trades SET tp1Hit = 1, stopLoss = ? WHERE id = ?")
+            .run(activeTrade.stopLoss, activeTrade.id);
+          console.log(`🎯 [TP1 Secured] ${symbol} ${activeTrade.type}: 50% Profit Locked @ $${currentPrice}! Stop Loss moved to Break-Even ($${activeTrade.entryPrice})`);
+        } catch (e) {
+          console.error("Failed to update TP1 state:", e);
+        }
+      }
+    }
+
+    // --- 2. EXIT CONDITION EVALUATION ---
     let result: 'WON' | 'LOST' | null = null;
+    let exitReason = '';
+
     if (activeTrade.type === 'LONG') {
-      if (currentPrice >= activeTrade.takeProfit) result = 'WON';
-      else if (currentPrice <= activeTrade.stopLoss) result = 'LOST';
-    } else {
-      if (currentPrice <= activeTrade.takeProfit) result = 'WON';
-      else if (currentPrice >= activeTrade.stopLoss) result = 'LOST';
+      if (currentPrice >= activeTrade.takeProfit) {
+        result = 'WON';
+        exitReason = 'TP2_FULL_TARGET';
+      } else if (currentPrice <= activeTrade.stopLoss) {
+        // If TP1 was already taken, closing at Break-Even is still a profitable outcome overall!
+        if (activeTrade.tp1Hit) {
+          result = 'WON';
+          exitReason = 'TP1_THEN_BREAKEVEN';
+        } else {
+          result = 'LOST';
+          exitReason = 'STOP_LOSS';
+        }
+      }
+    } else { // SHORT
+      if (currentPrice <= activeTrade.takeProfit) {
+        result = 'WON';
+        exitReason = 'TP2_FULL_TARGET';
+      } else if (currentPrice >= activeTrade.stopLoss) {
+        if (activeTrade.tp1Hit) {
+          result = 'WON';
+          exitReason = 'TP1_THEN_BREAKEVEN';
+        } else {
+          result = 'LOST';
+          exitReason = 'STOP_LOSS';
+        }
+      }
     }
     
     if (result) {
-      const updateStmt = this.db.prepare("UPDATE trades SET status = ?, closeTimestamp = ? WHERE id = ?");
-      updateStmt.run(result, Date.now(), activeTrade.id);
-      console.log(`Trade ${activeTrade.id} (${symbol}) Closed: ${result} at ${currentPrice}`);
+      const updateStmt = this.db.prepare("UPDATE trades SET status = ?, closeTimestamp = ?, exitReason = ? WHERE id = ?");
+      updateStmt.run(result, Date.now(), exitReason, activeTrade.id);
+      console.log(`Trade ${activeTrade.id} (${symbol}) Closed: ${result} [${exitReason}] at ${currentPrice}`);
       
-      // Consecutive Loss Protection: 35 minute cooldown after a loss to avoid trading in bad chop regimes
+      // Consecutive Loss Protection: 35 minute cooldown after an outright loss
       if (result === 'LOST') {
         const cooldownUntil = Date.now() + (35 * 60 * 1000);
         this.pairCooldowns[symbol] = cooldownUntil;
@@ -260,7 +314,7 @@ export class TradingBot {
       return;
     }
 
-    // --- DYNAMIC BREAK-EVEN & TRAILING STOP PROTECTION ---
+    // --- 3. DYNAMIC BREAK-EVEN & TRAILING STOP (If not already trailing) ---
     if (activeTrade.type === 'LONG') {
       const profitDistance = currentPrice - activeTrade.entryPrice;
       const tpDistance = activeTrade.takeProfit - activeTrade.entryPrice;
@@ -321,10 +375,36 @@ export class TradingBot {
       return;
     }
 
+    // 2. Global Exposure & Correlation Limit: Max 2 active trades across entire bot
+    const openTradesCount = Object.values(this.activeTrades).filter(t => t !== null).length;
+    if (openTradesCount >= 2) {
+      return; // Reject 3rd trade to prevent concentrated portfolio risk
+    }
+
     const data5m = this.data5m[symbol];
     const data15m = this.data15m[symbol];
     
     if (data5m.length < 50 || data15m.length < 50) return;
+
+    // 3. BTC MASTER TREND GUARD (Crypto Benchmark)
+    // If evaluating an altcoin (ETH, SOL, BNB, XRP, DOGE), align with Bitcoin macro trend
+    let btcBullish = true;
+    if (symbol !== 'BTCUSDT') {
+      const btc15m = this.data15m['BTCUSDT'];
+      if (btc15m && btc15m.length >= 30) {
+        const btcEma21 = calculateEMA(btc15m, 21);
+        const lastBtcEma21 = btcEma21[btcEma21.length - 1];
+        const lastBtcClose = btc15m[btc15m.length - 1].close;
+        btcBullish = lastBtcClose >= lastBtcEma21;
+      }
+    }
+
+    // 4. VOLUME SPIKE & EXHAUSTION FILTER
+    // Avoid entering at the tip of institutional liquidity grabs / exhaustion climaxes
+    const volExhaustion = detectVolumeExhaustion(data5m, 20);
+
+    // 5. SESSION & TIME FILTER
+    const sessionInfo = getTradingSessionInfo();
 
     // Macro Trend (15m timeframe)
     const ema21_15m = calculateEMA(data15m, 21);
@@ -358,8 +438,9 @@ export class TradingBot {
     const c_pDi = adxData.pDi[adxData.pDi.length - 1];
     const c_mDi = adxData.mDi[adxData.mDi.length - 1];
 
-    // ANTI-CHOP FILTER: Require ADX >= 22 (Confirmed trend strength, reject flat consolidation)
-    if (c_adx === null || c_adx < 22) {
+    // Dynamic ADX requirement based on current trading session
+    const requiredAdx = sessionInfo.minAdxThreshold;
+    if (c_adx === null || c_adx < requiredAdx) {
       return;
     }
 
@@ -372,12 +453,34 @@ export class TradingBot {
     const isEmaBullishCross = c_ema9 > c_ema21 && p_ema9 <= p_ema21;
     const isEmaBearishCross = c_ema9 < c_ema21 && p_ema9 >= p_ema21;
 
-    // Filter extreme overbought/oversold so we don't enter on exhaustion
+    // Filter extreme overbought/oversold
     const validLongRsi = c_rsi > 42 && c_rsi < 68;
     const validShortRsi = c_rsi < 58 && c_rsi > 32;
 
     let isLongSetup = isUptrend && validLongRsi && (isMacdBullishCross || isEmaBullishCross);
     let isShortSetup = isDowntrend && validShortRsi && (isMacdBearishCross || isEmaBearishCross);
+
+    // Apply BTC Master Guard: Never buy an altcoin if BTC is Bearish, never short if BTC is Bullish
+    if (symbol !== 'BTCUSDT') {
+      if (isLongSetup && !btcBullish) {
+        console.log(`[BTC Guard] ${symbol} LONG setup blocked because BTC is Bearish.`);
+        isLongSetup = false;
+      }
+      if (isShortSetup && btcBullish) {
+        console.log(`[BTC Guard] ${symbol} SHORT setup blocked because BTC is Bullish.`);
+        isShortSetup = false;
+      }
+    }
+
+    // Apply Volume Exhaustion Guard: Don't buy bull exhaustion wicks or short bear exhaustion wicks
+    if (isLongSetup && volExhaustion.isExhaustion && volExhaustion.exhaustionDirection === 'BULL_EXHAUSTION') {
+      console.log(`[Volume Exhaustion Guard] ${symbol} LONG blocked: Institutional upper wick rejection detected.`);
+      isLongSetup = false;
+    }
+    if (isShortSetup && volExhaustion.isExhaustion && volExhaustion.exhaustionDirection === 'BEAR_EXHAUSTION') {
+      console.log(`[Volume Exhaustion Guard] ${symbol} SHORT blocked: Institutional lower wick bounce detected.`);
+      isShortSetup = false;
+    }
 
     // --- INSTITUTIONAL QUANT FILTERS ---
     const fundingRate = this.fundingRates[symbol] || 0;
@@ -402,12 +505,15 @@ export class TradingBot {
         currentPrice - c_ema9, 
         currentPrice - c_ema21, 
         signalType === 'LONG' ? 1 : 0, 
-        macroBullish ? 1 : 0
+        macroBullish ? 1 : 0,
+        c_adx,
+        symbol === 'BTCUSDT' ? 1 : (btcBullish === (signalType === 'LONG') ? 1 : 0)
       ];
-      const aiConfidence = this.predictor.predict(features);
+      const quantConfidence = this.predictor.predict(features);
 
-      // Require AI confidence to be >= 45 to enter trade, otherwise skip
-      if (aiConfidence < 45) return;
+      // Session-sensitive Confluence threshold
+      const minConfidence = sessionInfo.isHighLiquidity ? 48 : 58;
+      if (quantConfidence < minConfidence) return;
 
       const srLevels = findSupportResistance(data15m);
       const vpvr = calculateVPVR(data15m, 50);
@@ -416,7 +522,7 @@ export class TradingBot {
       let stopLoss = 0;
       let takeProfit = 0;
       
-      // Stop Loss breathing room: 1.5x to 3.2x ATR to withstand normal 1m wick volatility
+      // Stop Loss breathing room: 1.5x to 3.2x ATR
       if (signalType === 'LONG') {
         const validSupports = srLevels.supports.filter(s => s < actualEntry);
         let closestSupport = validSupports.length > 0 ? Math.max(...validSupports) : actualEntry - (c_atr * 2);
@@ -435,7 +541,7 @@ export class TradingBot {
         }
         
         let tpDistance = closestResistance - actualEntry;
-        const minProfitable = actualEntry * 0.0035; // At least 0.35% minimum gain
+        const minProfitable = actualEntry * 0.0035;
         tpDistance = Math.max(slDistance * 1.6, Math.max(minProfitable, Math.min(slDistance * 3.5, tpDistance)));
         takeProfit = actualEntry + tpDistance;
 
@@ -462,6 +568,11 @@ export class TradingBot {
         takeProfit = actualEntry - tpDistance;
       }
 
+      // Compute TP1 (First partial target: 50% distance to full TP, securing 1R profit)
+      const tp1Price = signalType === 'LONG'
+        ? actualEntry + ((takeProfit - actualEntry) * 0.5)
+        : actualEntry - ((actualEntry - takeProfit) * 0.5);
+
       const newTrade: Trade = {
         id: Math.random().toString(36).substr(2, 9),
         pair: symbol,
@@ -469,25 +580,42 @@ export class TradingBot {
         entryPrice: parseFloat(actualEntry.toFixed(4)),
         takeProfit: parseFloat(takeProfit.toFixed(4)),
         stopLoss: parseFloat(stopLoss.toFixed(4)),
+        tp1Price: parseFloat(tp1Price.toFixed(4)),
+        tp1Hit: false,
         status: 'ACTIVE',
         timestamp: Date.now(),
-        confidence: aiConfidence,
+        confidence: quantConfidence,
         aiFeatures: features
       };
       
       this.activeTrades[symbol] = newTrade;
 
       const insertStmt = this.db.prepare(
-        "INSERT INTO trades (id, pair, type, entryPrice, takeProfit, stopLoss, status, timestamp, confidence, aiFeatures) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+        "INSERT INTO trades (id, pair, type, entryPrice, takeProfit, stopLoss, tp1Price, tp1Hit, status, timestamp, confidence, aiFeatures) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
       );
-      insertStmt.run(newTrade.id, newTrade.pair, newTrade.type, newTrade.entryPrice, newTrade.takeProfit, newTrade.stopLoss, newTrade.status, newTrade.timestamp, newTrade.confidence, JSON.stringify(newTrade.aiFeatures));
+      insertStmt.run(
+        newTrade.id, 
+        newTrade.pair, 
+        newTrade.type, 
+        newTrade.entryPrice, 
+        newTrade.takeProfit, 
+        newTrade.stopLoss, 
+        newTrade.tp1Price, 
+        0, 
+        newTrade.status, 
+        newTrade.timestamp, 
+        newTrade.confidence, 
+        JSON.stringify(newTrade.aiFeatures)
+      );
       
-      console.log(`[Quant V2 Entry] ${newTrade.pair} ${newTrade.type} @ ${newTrade.entryPrice} (ADX: ${c_adx.toFixed(1)}, AI: ${aiConfidence}%). SL: ${newTrade.stopLoss}, TP: ${newTrade.takeProfit}`);
+      console.log(`[Quant V3 Entry] ${newTrade.pair} ${newTrade.type} @ ${newTrade.entryPrice} (Session: ${sessionInfo.session}, ADX: ${c_adx.toFixed(1)}, Score: ${quantConfidence}%). TP1: ${newTrade.tp1Price}, TP2: ${newTrade.takeProfit}, SL: ${newTrade.stopLoss}`);
     }
   }
 
   public getDiagnostics() {
     const wsConnected = !!this.ws && this.ws.readyState === WebSocket.OPEN;
+    const sessionInfo = getTradingSessionInfo();
+
     const activeTradesList = Object.entries(this.activeTrades)
       .filter(([_, t]) => t !== null)
       .map(([pair, t]) => ({ 
@@ -495,7 +623,9 @@ export class TradingBot {
         type: t!.type, 
         entryPrice: t!.entryPrice,
         stopLoss: t!.stopLoss,
-        takeProfit: t!.takeProfit 
+        takeProfit: t!.takeProfit,
+        tp1Price: t!.tp1Price,
+        tp1Hit: !!t!.tp1Hit
       }));
 
     const activeCooldowns: Record<string, number> = {};
@@ -509,7 +639,10 @@ export class TradingBot {
     return {
       botStatus: 'ONLINE',
       wsStatus: wsConnected ? 'CONNECTED' : 'CONNECTING',
+      tradingSession: sessionInfo.session,
+      sessionHighLiquidity: sessionInfo.isHighLiquidity,
       monitoredPairs: PAIRS,
+      maxConcurrentTrades: 2,
       activeTradesCount: activeTradesList.length,
       activeTrades: activeTradesList,
       cooldowns: activeCooldowns,

@@ -302,3 +302,66 @@ export function calculateADX(data: Kline[], period: number = 14): { adx: number[
   return { adx, pDi, mDi };
 }
 
+// Volume Spike and Climax Exhaustion Detection
+// Detects institutional volume spikes with rejection wicks (liquidity traps / fakeouts)
+export function detectVolumeExhaustion(data: Kline[], period: number = 20): { isSpike: boolean; isExhaustion: boolean; exhaustionDirection?: 'BULL_EXHAUSTION' | 'BEAR_EXHAUSTION' } {
+  if (data.length < period + 1) {
+    return { isSpike: false, isExhaustion: false };
+  }
+
+  const current = data[data.length - 1];
+  let sumVol = 0;
+  for (let i = data.length - 1 - period; i < data.length - 1; i++) {
+    sumVol += data[i].volume;
+  }
+  const avgVol = sumVol / period;
+
+  const isSpike = current.volume > avgVol * 2.8;
+
+  // Candle range and wicks
+  const candleRange = current.high - current.low;
+  if (candleRange <= 0 || !isSpike) {
+    return { isSpike, isExhaustion: false };
+  }
+
+  const upperWick = current.high - Math.max(current.open, current.close);
+  const lowerWick = Math.min(current.open, current.close) - current.low;
+
+  // Upper wick >= 45% of total candle range on 2.8x+ volume = Buyers exhausted / Bull trap
+  if (upperWick / candleRange >= 0.45) {
+    return { isSpike: true, isExhaustion: true, exhaustionDirection: 'BULL_EXHAUSTION' };
+  }
+
+  // Lower wick >= 45% of total candle range on 2.8x+ volume = Sellers exhausted / Bear trap
+  if (lowerWick / candleRange >= 0.45) {
+    return { isSpike: true, isExhaustion: true, exhaustionDirection: 'BEAR_EXHAUSTION' };
+  }
+
+  return { isSpike: true, isExhaustion: false };
+}
+
+// Global Trading Sessions (London & NY have highest liquidity and true trends)
+export function getTradingSessionInfo(): { session: 'LONDON' | 'NEW_YORK' | 'LONDON_NY_OVERLAP' | 'ASIA' | 'OFF_PEAK'; isHighLiquidity: boolean; minAdxThreshold: number } {
+  const now = new Date();
+  const utcHour = now.getUTCHours();
+
+  // London & New York Overlap: 13:00 - 16:30 UTC (Prime Volatility)
+  if (utcHour >= 13 && utcHour < 17) {
+    return { session: 'LONDON_NY_OVERLAP', isHighLiquidity: true, minAdxThreshold: 20 };
+  }
+  // London Session: 08:00 - 13:00 UTC
+  if (utcHour >= 8 && utcHour < 13) {
+    return { session: 'LONDON', isHighLiquidity: true, minAdxThreshold: 22 };
+  }
+  // New York Session Afternoon: 17:00 - 21:00 UTC
+  if (utcHour >= 17 && utcHour < 21) {
+    return { session: 'NEW_YORK', isHighLiquidity: true, minAdxThreshold: 22 };
+  }
+  // Asian Session: 00:00 - 08:00 UTC
+  if (utcHour >= 0 && utcHour < 8) {
+    return { session: 'ASIA', isHighLiquidity: false, minAdxThreshold: 25 };
+  }
+  // Off-peak Dead Zone: 21:00 - 24:00 UTC (Prone to low-volume chops & manipulation)
+  return { session: 'OFF_PEAK', isHighLiquidity: false, minAdxThreshold: 27 };
+}
+

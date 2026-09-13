@@ -25,10 +25,13 @@ export interface Trade {
   entryPrice: number;
   takeProfit: number;
   stopLoss: number;
+  tp1Price?: number;
+  tp1Hit?: boolean;
   status: TradeStatus;
   timestamp: number;
   closeTimestamp?: number;
   confidence: number;
+  exitReason?: string;
   aiFeatures?: number[];
 }
 

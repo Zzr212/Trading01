@@ -14,10 +14,13 @@ db.exec(`CREATE TABLE IF NOT EXISTS trades (
   entryPrice REAL,
   takeProfit REAL,
   stopLoss REAL,
+  tp1Price REAL,
+  tp1Hit INTEGER,
   status TEXT,
   timestamp INTEGER,
   closeTimestamp INTEGER,
   confidence INTEGER,
+  exitReason TEXT,
   aiFeatures TEXT
 )`);
 
@@ -27,6 +30,18 @@ try {
 
 try {
   db.exec("ALTER TABLE trades ADD COLUMN closeTimestamp INTEGER;");
+} catch(e) {}
+
+try {
+  db.exec("ALTER TABLE trades ADD COLUMN tp1Price REAL;");
+} catch(e) {}
+
+try {
+  db.exec("ALTER TABLE trades ADD COLUMN tp1Hit INTEGER;");
+} catch(e) {}
+
+try {
+  db.exec("ALTER TABLE trades ADD COLUMN exitReason TEXT;");
 } catch(e) {}
 
 db.exec(`CREATE TABLE IF NOT EXISTS trade_reviews (

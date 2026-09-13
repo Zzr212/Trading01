@@ -214,9 +214,42 @@ function TradeItem({ trade, onReview }: { trade: Trade; onReview?: () => void; k
         </div>
         
         <div className="flex items-center gap-3">
-          {trade.status === 'ACTIVE' && <div className="flex items-center gap-1 text-xs text-orange-400 animate-pulse"><Clock size={12}/> Running</div>}
-          {trade.status === 'WON' && <div className="flex items-center gap-1 text-xs font-semibold text-green-500"><CheckCircle2 size={14}/> Won</div>}
-          {trade.status === 'LOST' && <div className="flex items-center gap-1 text-xs font-semibold text-neutral-500"><XCircle size={14}/> Lost</div>}
+          {trade.status === 'ACTIVE' && (
+            <div className="flex items-center gap-1.5">
+              {trade.tp1Hit && (
+                <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                  TP1 Hit (BE Active)
+                </span>
+              )}
+              <div className="flex items-center gap-1 text-xs text-orange-400 animate-pulse">
+                <Clock size={12}/> Running
+              </div>
+            </div>
+          )}
+          {trade.status === 'WON' && (
+            <div className="flex flex-col items-end">
+              <div className="flex items-center gap-1 text-xs font-semibold text-green-500">
+                <CheckCircle2 size={14}/> Won
+              </div>
+              {trade.exitReason && (
+                <span className="text-[9px] text-neutral-400 font-mono">
+                  {trade.exitReason === 'TP1_THEN_BREAKEVEN' ? 'TP1 + Break-Even' : 'TP2 Target'}
+                </span>
+              )}
+            </div>
+          )}
+          {trade.status === 'LOST' && (
+            <div className="flex flex-col items-end">
+              <div className="flex items-center gap-1 text-xs font-semibold text-neutral-500">
+                <XCircle size={14}/> Lost
+              </div>
+              {trade.exitReason && (
+                <span className="text-[9px] text-rose-400 font-mono">
+                  Stop Loss Hit
+                </span>
+              )}
+            </div>
+          )}
           
           {onReview && (
             <button 
@@ -230,18 +263,24 @@ function TradeItem({ trade, onReview }: { trade: Trade; onReview?: () => void; k
         </div>
       </div>
 
-      <div className="flex justify-between items-center text-sm font-mono">
+      <div className="grid grid-cols-4 gap-2 text-xs font-mono bg-neutral-900/30 p-2 rounded-lg border border-neutral-800/40">
         <div className="flex flex-col">
-          <span className="text-[10px] text-neutral-500 font-sans tracking-wide">ENTRY</span>
+          <span className="text-[9px] text-neutral-500 font-sans tracking-wide">ENTRY</span>
           <span className="text-neutral-200">${trade.entryPrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
         </div>
         <div className="flex flex-col items-center">
-          <span className="text-[10px] text-neutral-500 font-sans tracking-wide">TAKE PROFIT</span>
-          <span className="text-green-500">${trade.takeProfit.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+          <span className="text-[9px] text-neutral-500 font-sans tracking-wide">TP1 (50%)</span>
+          <span className={trade.tp1Hit ? "text-emerald-400 font-bold" : "text-emerald-500/70"}>
+            {trade.tp1Price ? `$${trade.tp1Price.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '--'}
+          </span>
+        </div>
+        <div className="flex flex-col items-center">
+          <span className="text-[9px] text-neutral-500 font-sans tracking-wide">TP2 (RUNNER)</span>
+          <span className="text-green-500 font-semibold">${trade.takeProfit.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
         </div>
         <div className="flex flex-col items-end">
-          <span className="text-[10px] text-neutral-500 font-sans tracking-wide">STOP LOSS</span>
-          <span className="text-red-500">${trade.stopLoss.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+          <span className="text-[9px] text-neutral-500 font-sans tracking-wide">STOP LOSS</span>
+          <span className="text-red-400">${trade.stopLoss.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
         </div>
       </div>
     </motion.div>

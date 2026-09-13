@@ -127,6 +127,7 @@ export default function CandlestickChart({ symbol = 'BTCUSDT', data, timeframe, 
       entryY: number;
       tpY: number;
       slY: number;
+      tp1Y: number | null;
       isLong: boolean;
       entryFound: boolean;
     } | null = null;
@@ -190,7 +191,8 @@ export default function CandlestickChart({ symbol = 'BTCUSDT', data, timeframe, 
         endX = Math.max(startX + candleTotalWidth * 2, Math.min(width - 5, lastCandleX + candleTotalWidth * 4));
       }
 
-      tradeMetrics = { startX, endX, entryY, tpY, slY, isLong, entryFound };
+      const tp1Y = activeTrade.tp1Price ? getY(activeTrade.tp1Price) : null;
+      tradeMetrics = { startX, endX, entryY, tpY, slY, tp1Y, isLong, entryFound };
 
       // 2. Draw Translucent Profit & Loss Areas (Background)
       const boxWidth = Math.max(candleTotalWidth, endX - startX);
@@ -273,9 +275,9 @@ export default function CandlestickChart({ symbol = 'BTCUSDT', data, timeframe, 
 
     // 5. Draw Trade Lines, Badges & Indicators (Foreground)
     if (activeTrade && tradeMetrics) {
-      const { startX, endX, entryY, tpY, slY, isLong } = tradeMetrics;
+      const { startX, endX, entryY, tpY, slY, tp1Y, isLong } = tradeMetrics;
 
-      // Take Profit Line (Dashed Green)
+      // Take Profit 2 Line (Full Target - Dashed Green)
       ctx.strokeStyle = '#22c55e';
       ctx.lineWidth = 1.5;
       ctx.setLineDash([4, 4]);
@@ -283,6 +285,17 @@ export default function CandlestickChart({ symbol = 'BTCUSDT', data, timeframe, 
       ctx.moveTo(startX, tpY);
       ctx.lineTo(endX, tpY);
       ctx.stroke();
+
+      // Take Profit 1 Line (Partial 50% Target - Dotted Emerald)
+      if (tp1Y !== null) {
+        ctx.strokeStyle = '#10b981';
+        ctx.lineWidth = 1.2;
+        ctx.setLineDash([2, 3]);
+        ctx.beginPath();
+        ctx.moveTo(startX, tp1Y);
+        ctx.lineTo(endX, tp1Y);
+        ctx.stroke();
+      }
 
       // Stop Loss Line (Dashed Red)
       ctx.strokeStyle = '#ef4444';
@@ -398,7 +411,10 @@ export default function CandlestickChart({ symbol = 'BTCUSDT', data, timeframe, 
         ctx.fillText(labelText, pillX + pillW / 2, pillY + 11);
       };
 
-      drawAxisPill(tpY, 'TP', `$${activeTrade.takeProfit.toFixed(2)}`, '#16a34a');
+      drawAxisPill(tpY, 'TP2', `$${activeTrade.takeProfit.toFixed(2)}`, '#16a34a');
+      if (activeTrade.tp1Price && tp1Y !== null) {
+        drawAxisPill(tp1Y, activeTrade.tp1Hit ? 'TP1 [✓]' : 'TP1', `$${activeTrade.tp1Price.toFixed(2)}`, '#10b981', '#022c22');
+      }
       drawAxisPill(slY, 'SL', `$${activeTrade.stopLoss.toFixed(2)}`, '#dc2626');
       drawAxisPill(entryY, 'ENTRY', `$${activeTrade.entryPrice.toFixed(2)}`, '#0284c7');
     }

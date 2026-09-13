@@ -25,9 +25,12 @@ interface SystemHealthData {
   };
   botStatus: string;
   wsStatus: string;
+  tradingSession?: string;
+  sessionHighLiquidity?: boolean;
   monitoredPairs: string[];
+  maxConcurrentTrades?: number;
   activeTradesCount: number;
-  activeTrades: Array<{ pair: string; type: string; entryPrice: number }>;
+  activeTrades: Array<{ pair: string; type: string; entryPrice: number; stopLoss?: number; takeProfit?: number; tp1Price?: number; tp1Hit?: boolean }>;
   cooldowns?: Record<string, number>;
   fundingRates: Record<string, number>;
   orderBookImbalances: Record<string, number>;
@@ -201,38 +204,34 @@ export default function SystemDiagnosticsModal({ isOpen, onClose }: Props) {
 
             {/* Detailed System Cards */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2">
-              {/* 1. TensorFlow.js Card */}
+              {/* 1. Quant Confluence Card */}
               <div className="bg-neutral-900/40 border border-neutral-800/80 rounded-xl p-4 space-y-3">
                 <div className="flex items-center justify-between pb-2 border-b border-neutral-800/60">
                   <div className="flex items-center gap-2 text-white font-medium text-sm">
                     <Cpu size={16} className="text-purple-400" />
-                    <span>TensorFlow.js Neural Engine</span>
+                    <span>Quant Multi-Factor Engine</span>
                   </div>
                   <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-purple-500/10 text-purple-300 border border-purple-500/20">
-                    {data?.aiModel.status || 'READY'}
+                    {data?.aiModel.status || 'ACTIVE'}
                   </span>
                 </div>
                 <div className="space-y-1.5 text-xs font-mono">
                   <div className="flex justify-between text-neutral-400">
-                    <span>TF Backend:</span>
-                    <span className="text-white font-semibold">{data?.aiModel.backend || 'cpu'}</span>
+                    <span>Engine Type:</span>
+                    <span className="text-white font-semibold">Deterministic Confluence</span>
                   </div>
                   <div className="flex justify-between text-neutral-400">
-                    <span>Network Topology:</span>
-                    <span className="text-white">3 Layers (16 &rarr; 8 &rarr; 1)</span>
+                    <span>Evaluated Factors:</span>
+                    <span className="text-white">Trend, VWAP, ADX, BTC, OB</span>
                   </div>
                   <div className="flex justify-between text-neutral-400">
-                    <span>Memory Buffer:</span>
-                    <span className="text-white">{data?.aiModel.memorySize || 0} sample trades</span>
-                  </div>
-                  <div className="flex justify-between text-neutral-400">
-                    <span>Retraining Trigger:</span>
-                    <span className="text-emerald-400">Every 5 closed trades</span>
+                    <span>Sample Buffer:</span>
+                    <span className="text-white">{data?.aiModel.memorySize || 0} trades tracked</span>
                   </div>
                   <div className="flex justify-between text-neutral-400">
                     <span>Model State:</span>
                     <span className="text-emerald-400 flex items-center gap-1">
-                      <CheckCircle2 size={12} /> Trained & Operational
+                      <CheckCircle2 size={12} /> Live Multi-Factor Active
                     </span>
                   </div>
                 </div>
@@ -330,11 +329,29 @@ export default function SystemDiagnosticsModal({ isOpen, onClose }: Props) {
                   </div>
                   <div className="flex justify-between text-neutral-400">
                     <span>Active Positions:</span>
-                    <span className="text-white">{data?.activeTradesCount || 0} Open</span>
+                    <span className="text-white font-medium">{data?.activeTradesCount || 0} / {data?.maxConcurrentTrades || 2} Max</span>
+                  </div>
+                  <div className="flex justify-between text-neutral-400">
+                    <span>Market Session:</span>
+                    <span className={`font-mono font-medium ${data?.sessionHighLiquidity ? 'text-emerald-400' : 'text-amber-400'}`}>
+                      {data?.tradingSession || 'GLOBAL'} ({data?.sessionHighLiquidity ? 'High Liquidity' : 'Strict Mode'})
+                    </span>
+                  </div>
+                  <div className="flex justify-between text-neutral-400">
+                    <span>BTC Master Guard:</span>
+                    <span className="text-emerald-400">Active (Altcoins follow BTC)</span>
+                  </div>
+                  <div className="flex justify-between text-neutral-400">
+                    <span>Take-Profit Engine:</span>
+                    <span className="text-emerald-400">Dynamic TP1 (50% Out + BE)</span>
                   </div>
                   <div className="flex justify-between text-neutral-400">
                     <span>Anti-Chop Filter:</span>
-                    <span className="text-emerald-400">ADX (≥22 Trend Confirmed)</span>
+                    <span className="text-emerald-400">ADX (Session-Adaptive)</span>
+                  </div>
+                  <div className="flex justify-between text-neutral-400">
+                    <span>Volume Guard:</span>
+                    <span className="text-emerald-400">Exhaustion & Climax Filter</span>
                   </div>
                   <div className="flex justify-between text-neutral-400">
                     <span>Signal Execution:</span>
@@ -342,7 +359,7 @@ export default function SystemDiagnosticsModal({ isOpen, onClose }: Props) {
                   </div>
                   <div className="flex justify-between text-neutral-400">
                     <span>Loss Protection:</span>
-                    <span className="text-emerald-400">Break-Even & 35m Cooldown</span>
+                    <span className="text-emerald-400">35m Cooldown Period</span>
                   </div>
                   {data?.cooldowns && Object.keys(data.cooldowns).length > 0 && (
                     <div className="flex justify-between text-amber-400 pt-1 border-t border-neutral-800/60">
