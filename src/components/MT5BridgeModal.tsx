@@ -88,13 +88,37 @@ export const MT5BridgeModal: React.FC<MT5BridgeModalProps> = ({ isOpen, onClose 
           setTunnelUrl(data.tunnelUrl);
         }
         if (data.config) {
-          const resolvedUrl = data.tunnelUrl || data.config.serverUrl || window.location.origin;
+          const isCloudRun = typeof window !== 'undefined' && window.location.origin.includes('run.app');
+          const isIpOrLocal = typeof window !== 'undefined' && (
+            /^(https?:\/\/)?(\d{1,3}\.){3}\d{1,3}(:\d+)?$/.test(window.location.origin) ||
+            window.location.hostname === 'localhost' ||
+            window.location.hostname.includes('oracle')
+          );
+          
+          // Determine the most reliable URL:
+          // 1. If user already saved a custom serverUrl (that is not an expired trycloudflare tunnel), keep it
+          // 2. If running on Oracle VPS (direct IP origin), use current origin (e.g. http://92.5.176.43:3000)
+          // 3. If running inside Cloud Run preview (*.run.app), prefer the live tunnel if available
+          let resolvedUrl = data.config.serverUrl || window.location.origin;
+          if (isIpOrLocal) {
+            resolvedUrl = window.location.origin;
+          } else if (data.config.serverUrl && !data.config.serverUrl.includes('trycloudflare')) {
+            resolvedUrl = data.config.serverUrl;
+          } else if (isCloudRun && data.tunnelUrl) {
+            resolvedUrl = data.tunnelUrl;
+          } else if (data.tunnelUrl) {
+            resolvedUrl = data.tunnelUrl;
+          }
+
           setConfig(prev => ({
             ...prev,
             ...data.config,
-            serverUrl: resolvedUrl
+            serverUrl: prev.serverUrl && !isInitial ? prev.serverUrl : resolvedUrl
           }));
-          setEaCode(generateMql5EACode(resolvedUrl));
+
+          if (isInitial) {
+            setEaCode(generateMql5EACode(resolvedUrl));
+          }
         }
         if (data.status) {
           setStatus(data.status);
@@ -381,6 +405,34 @@ export const MT5BridgeModal: React.FC<MT5BridgeModalProps> = ({ isOpen, onClose 
                     {copied ? <Check size={14} className="text-emerald-400" /> : <Copy size={14} />}
                     <span>{copied ? 'Kopirano' : 'Kopiraj'}</span>
                   </button>
+                </div>
+
+                {/* Quick 1-click Preset Selector */}
+                <div className="flex flex-wrap items-center gap-2 pt-1">
+                  <span className="text-[10px] text-neutral-500 uppercase tracking-wider font-mono">Brzi izbor:</span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const oracleUrl = 'http://92.5.176.43:3000';
+                      setConfig(prev => ({ ...prev, serverUrl: oracleUrl }));
+                      setEaCode(generateMql5EACode(oracleUrl));
+                    }}
+                    className="px-2.5 py-1 rounded bg-neutral-800 hover:bg-neutral-700 text-emerald-400 border border-neutral-700 text-[11px] font-mono transition-colors flex items-center gap-1 cursor-pointer"
+                  >
+                    <span>⚡ Preporuka: Direktni Oracle VPS (http://92.5.176.43:3000)</span>
+                  </button>
+                  {tunnelUrl && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setConfig(prev => ({ ...prev, serverUrl: tunnelUrl }));
+                        setEaCode(generateMql5EACode(tunnelUrl));
+                      }}
+                      className="px-2 py-1 rounded bg-neutral-850 hover:bg-neutral-800 text-neutral-400 border border-neutral-800 text-[11px] font-mono transition-colors flex items-center gap-1 cursor-pointer"
+                    >
+                      <span>☁️ Cloudflare Tunel</span>
+                    </button>
+                  )}
                 </div>
 
                 {/* Oracle VPS Specific Checklist */}
