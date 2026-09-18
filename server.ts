@@ -82,6 +82,26 @@ async function startServer() {
   const app = express();
   const PORT = 3000;
   
+  // Resilient body parser for MT5 WebRequest (handles trailing \0 null bytes and raw text safely)
+  app.use((req, res, next) => {
+    const contentType = req.headers['content-type'] || '';
+    if (contentType.includes('application/json') || contentType.includes('text/plain')) {
+      let rawData = '';
+      req.setEncoding('utf8');
+      req.on('data', chunk => { rawData += chunk; });
+      req.on('end', () => {
+        try {
+          const clean = rawData.replace(/\0/g, '').trim();
+          req.body = clean ? JSON.parse(clean) : {};
+        } catch (_) {
+          req.body = {};
+        }
+        next();
+      });
+    } else {
+      next();
+    }
+  });
   app.use(express.json({ limit: '50mb' }));
 
   // System Diagnostics & Health Check
@@ -118,10 +138,11 @@ async function startServer() {
       const stats: Record<string, { won: number, lost: number, active: number }> = {};
       
       rows.forEach(r => {
-        if (!stats[r.pair]) stats[r.pair] = { won: 0, lost: 0, active: 0 };
-        if (r.status === 'WON') stats[r.pair].won = r.count;
-        if (r.status === 'LOST') stats[r.pair].lost = r.count;
-        if (r.status === 'ACTIVE') stats[r.pair].active = r.count;
+        const pair = r.pair && r.pair.endsWith('USDT') ? r.pair.slice(0, -1) : r.pair;
+        if (!stats[pair]) stats[pair] = { won: 0, lost: 0, active: 0 };
+        if (r.status === 'WON') stats[pair].won += r.count;
+        if (r.status === 'LOST') stats[pair].lost += r.count;
+        if (r.status === 'ACTIVE') stats[pair].active += r.count;
       });
       
       res.json(stats);
@@ -133,8 +154,12 @@ async function startServer() {
   app.get("/api/trades", (req, res) => {
     try {
       const stmt = db.prepare("SELECT * FROM trades ORDER BY timestamp DESC");
-      const rows = stmt.all();
-      res.json(rows);
+      const rows = stmt.all() as any[];
+      const normalized = rows.map(r => ({
+        ...r,
+        pair: r.pair && r.pair.endsWith('USDT') ? r.pair.slice(0, -1) : r.pair
+      }));
+      res.json(normalized);
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
@@ -301,11 +326,12 @@ async function startServer() {
       const closedRows = db.prepare("SELECT id FROM trades WHERE status IN ('WON', 'LOST') AND closeTimestamp >= ?").all(twoHoursAgo) as any[];
 
       const activeTradesPayload = activeRows.map(t => {
-        const mt5Symbol = config.symbolMappings[t.pair] || t.pair;
-        const lotSize = config.lotSizes[t.pair] || 0.01;
+        const cleanPair = t.pair && t.pair.endsWith('USDT') ? t.pair.slice(0, -1) : t.pair;
+        const mt5Symbol = config.symbolMappings[cleanPair] || config.symbolMappings[t.pair] || cleanPair;
+        const lotSize = config.lotSizes[cleanPair] || config.lotSizes[t.pair] || 0.01;
         return {
           id: t.id,
-          symbol: t.pair,
+          symbol: cleanPair,
           mt5Symbol: mt5Symbol,
           type: t.type, // 'LONG' or 'SHORT'
           entryPrice: t.entryPrice,
@@ -329,10 +355,10 @@ async function startServer() {
     }
   });
 
-  // 4. Heartbeat from MT5 Expert Advisor (Terminal Telemetry)
-  app.post("/api/mt5/heartbeat", (req, res) => {
+  // 4. Heartbeat from MT5 Expert Advisor (Terminal Telemetry - supports both POST and GET)
+  const handleHeartbeat = (req: any, res: any) => {
     try {
-      const hb: MT5Heartbeat = req.body;
+      const hb = (req.method === 'GET' ? req.query : req.body) || {};
       const stmt = db.prepare(`
         INSERT OR REPLACE INTO mt5_state (
           id, lastHeartbeat, accountNumber, broker, balance, equity, margin, freeMargin, openPositionsCount
@@ -340,19 +366,22 @@ async function startServer() {
       `);
       stmt.run(
         Date.now(),
-        hb.accountNumber || "Unknown",
-        hb.broker || "Vantage",
-        hb.balance || 0,
-        hb.equity || 0,
-        hb.margin || 0,
-        hb.freeMargin || 0,
-        hb.openPositionsCount || 0
+        hb.accountNumber ? String(hb.accountNumber) : "Unknown",
+        hb.broker ? String(hb.broker) : "Vantage",
+        parseFloat(hb.balance) || 0,
+        parseFloat(hb.equity) || 0,
+        parseFloat(hb.margin) || 0,
+        parseFloat(hb.freeMargin) || 0,
+        parseInt(hb.openPositionsCount) || 0
       );
-      res.json({ success: true, acknowledged: true });
+      res.json({ success: true, acknowledged: true, connected: true, serverTime: Date.now() });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
-  });
+  };
+
+  app.post("/api/mt5/heartbeat", handleHeartbeat);
+  app.get("/api/mt5/heartbeat", handleHeartbeat);
 
   // 5. Download / Fetch Generated MQL5 EA Code
   app.get("/api/mt5/ea-code", (req, res) => {

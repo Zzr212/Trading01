@@ -13,6 +13,12 @@ interface PairStats {
 }
 
 const COLORS: Record<string, string> = {
+  'BTCUSD': '#F7931A',
+  'ETHUSD': '#627EEA',
+  'SOLUSD': '#14F195',
+  'BNBUSD': '#F3BA2F',
+  'XRPUSD': '#1E88E5',
+  'DOGEUSD': '#C2A633',
   'BTCUSDT': '#F7931A',
   'ETHUSDT': '#627EEA',
   'SOLUSDT': '#14F195',
@@ -21,7 +27,10 @@ const COLORS: Record<string, string> = {
   'DOGEUSDT': '#C2A633'
 };
 
-const PAIRS = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT', 'XRPUSDT', 'DOGEUSDT'];
+const PAIRS = ['BTCUSD', 'ETHUSD', 'SOLUSD', 'BNBUSD', 'XRPUSD', 'DOGEUSD'];
+
+const toBinance = (p: string) => p.endsWith('USDT') ? p : `${p}T`;
+const fromBinance = (s: string) => s.endsWith('USDT') ? s.slice(0, -1) : s;
 
 interface Props {
   onSelectPair: (pair: string) => void;
@@ -53,8 +62,9 @@ export default function Dashboard({ onSelectPair }: Props) {
         const priceMap: Record<string, number> = {};
         if (Array.isArray(data)) {
           data.forEach(d => {
-            if (PAIRS.includes(d.symbol)) {
-              priceMap[d.symbol] = parseFloat(d.price);
+            const clean = fromBinance(d.symbol);
+            if (PAIRS.includes(clean)) {
+              priceMap[clean] = parseFloat(d.price);
             }
           });
           setPrices(priceMap);
@@ -63,17 +73,17 @@ export default function Dashboard({ onSelectPair }: Props) {
     };
     fetchPrices();
 
-    const streams = PAIRS.map(p => `${p.toLowerCase()}@ticker`).join('/');
+    const streams = PAIRS.map(p => `${toBinance(p).toLowerCase()}@ticker`).join('/');
     const ws = new WebSocket(`wss://stream.binance.com:9443/stream?streams=${streams}`);
     
     ws.onmessage = (event) => {
       try {
         const payload = JSON.parse(event.data);
         if (payload.data && payload.data.s && payload.data.c) {
-          const symbol = payload.data.s;
+          const clean = fromBinance(payload.data.s);
           const price = parseFloat(payload.data.c);
-          if (PAIRS.includes(symbol)) {
-            setPrices(prev => ({ ...prev, [symbol]: price }));
+          if (PAIRS.includes(clean)) {
+            setPrices(prev => ({ ...prev, [clean]: price }));
           }
         }
       } catch (e) {}
@@ -303,7 +313,7 @@ export default function Dashboard({ onSelectPair }: Props) {
                >
                  <div className="flex items-center gap-4 mb-4 sm:mb-0">
                    <div className="w-12 h-12 rounded-full flex items-center justify-center font-bold text-sm shadow-inner" style={{ backgroundColor: `${COLORS[pair]}15`, color: COLORS[pair], border: `1px solid ${COLORS[pair]}40` }}>
-                     {pair.replace('USDT', '')}
+                     {pair.replace('USDT', '').replace('USD', '')}
                    </div>
                    <div>
                      <div className="flex items-center gap-2">

@@ -46,5 +46,5 @@ export interface SRLevels {
   resistances: number[];
 }
 
-export const PAIRS = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT', 'XRPUSDT', 'DOGEUSDT'];
+export const PAIRS = ['BTCUSD', 'ETHUSD', 'SOLUSD', 'BNBUSD', 'XRPUSD', 'DOGEUSD'];
 

@@ -73,7 +73,8 @@ export default function ChartContainer({ symbol, onBack, activeTrade, onPriceUpd
         setData(initialData);
         setIsLoading(false);
 
-        const wsUrl = `wss://stream.binance.com:9443/ws/${symbol.toLowerCase()}@kline_${timeframe}`;
+        const binanceSym = symbol.endsWith('USDT') ? symbol.toLowerCase() : (symbol.endsWith('USD') ? `${symbol.toLowerCase()}t` : `${symbol.toLowerCase()}usdt`);
+        const wsUrl = `wss://stream.binance.com:9443/ws/${binanceSym}@kline_${timeframe}`;
         const ws = new WebSocket(wsUrl);
         wsRef.current = ws;
 

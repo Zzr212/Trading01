@@ -375,16 +375,16 @@ export const MT5BridgeModal: React.FC<MT5BridgeModalProps> = ({ isOpen, onClose 
                 <table className="w-full text-left border-collapse text-xs">
                   <thead>
                     <tr className="bg-neutral-900/80 border-b border-neutral-800 text-neutral-400 font-mono">
-                      <th className="py-2.5 px-4">Bot Simbol (Binance)</th>
-                      <th className="py-2.5 px-4">MT5 Simbol kod brokera (Vantage)</th>
+                      <th className="py-2.5 px-4">Bot Simbol</th>
+                      <th className="py-2.5 px-4">MT5 Simbol na Vantage-u</th>
                       <th className="py-2.5 px-4">Trgovani Lot (Volume)</th>
                       <th className="py-2.5 px-4">Preporučeni Min. Lot</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-neutral-850">
                     {PAIRS.map(pair => {
-                      const currentLot = config.lotSizes[pair] ?? 0.01;
-                      const currentMt5Sym = config.symbolMappings[pair] ?? pair.replace('USDT', 'USD');
+                      const currentLot = config.lotSizes[pair] ?? (config.lotSizes[`${pair}T`] ?? 0.01);
+                      const currentMt5Sym = config.symbolMappings[pair] ?? (config.symbolMappings[`${pair}T`] ?? pair);
                       
                       return (
                         <tr key={pair} className="hover:bg-neutral-900/40 transition-colors">
@@ -405,7 +405,7 @@ export const MT5BridgeModal: React.FC<MT5BridgeModalProps> = ({ isOpen, onClose 
                                   }
                                 }));
                               }}
-                              placeholder="npr. BTCUSD ili BTCUSDT"
+                              placeholder="npr. BTCUSD"
                               className="bg-neutral-950 border border-neutral-800 rounded-lg px-2.5 py-1.5 text-xs font-mono text-neutral-200 focus:border-blue-500 focus:outline-none w-36"
                             />
                           </td>
@@ -429,7 +429,7 @@ export const MT5BridgeModal: React.FC<MT5BridgeModalProps> = ({ isOpen, onClose 
                             />
                           </td>
                           <td className="py-3 px-4 text-neutral-500 font-mono text-[11px]">
-                            {pair === 'BTCUSDT' ? '0.01 (1 mikrolot)' : pair === 'ETHUSDT' ? '0.05' : pair === 'DOGEUSDT' ? '10 - 100' : '0.10'}
+                            {pair === 'BTCUSD' ? '0.01 (1 mikrolot)' : pair === 'ETHUSD' ? '0.05' : pair === 'DOGEUSD' ? '10 - 100' : '0.10'}
                           </td>
                         </tr>
                       );

@@ -26,20 +26,20 @@ export const DEFAULT_MT5_CONFIG: MT5Config = {
   magicNumber: 889900,
   slippagePoints: 50,
   lotSizes: {
-    "BTCUSDT": 0.01,
-    "ETHUSDT": 0.05,
-    "SOLUSDT": 0.20,
-    "BNBUSDT": 0.10,
-    "XRPUSDT": 10.0,
-    "DOGEUSDT": 100.0
+    "BTCUSD": 0.01,
+    "ETHUSD": 0.05,
+    "SOLUSD": 0.20,
+    "BNBUSD": 0.10,
+    "XRPUSD": 10.0,
+    "DOGEUSD": 100.0
   },
   symbolMappings: {
-    "BTCUSDT": "BTCUSD",
-    "ETHUSDT": "ETHUSD",
-    "SOLUSDT": "SOLUSD",
-    "BNBUSDT": "BNBUSD",
-    "XRPUSDT": "XRPUSD",
-    "DOGEUSDT": "DOGEUSD"
+    "BTCUSD": "BTCUSD",
+    "ETHUSD": "ETHUSD",
+    "SOLUSD": "SOLUSD",
+    "BNBUSD": "BNBUSD",
+    "XRPUSD": "XRPUSD",
+    "DOGEUSD": "DOGEUSD"
   }
 };
 
@@ -52,7 +52,7 @@ export function generateMql5EACode(serverBaseUrl: string): string {
 //+------------------------------------------------------------------+
 #property copyright "AI Trading Bot"
 #property link      "${cleanUrl}"
-#property version   "2.00"
+#property version   "2.10"
 #property strict
 
 #include <Trade\\Trade.mqh>
@@ -82,8 +82,8 @@ int OnInit()
    ExtTrade.SetDeviationInPoints(InpDeviation);
    ExtTrade.SetTypeFilling(ORDER_FILLING_IOC);
    
-   Print(">>> [AI Trader MT5 Bridge] Inicijalizovan za server: ", InpServerUrl);
-   Print(">>> VAŽNO: Proverite da li je u MT5: Tools -> Options -> Expert Advisors -> 'Allow WebRequest' čekirano za: ", InpServerUrl);
+   Print(">>> [AI Trader MT5 Bridge v2.1] Pokrenut za server: ", InpServerUrl);
+   Print(">>> VAŽNO: Proverite da li je u MT5: Tools -> Options -> Expert Advisors -> 'Allow WebRequest' dodat tačan URL: ", InpServerUrl);
    
    EventSetTimer(InpTimerSeconds);
    SendHeartbeat();
@@ -106,8 +106,8 @@ void OnTimer()
 {
    PollSignalsFromServer();
    
-   // Pošalji heartbeat svakih 10 sekundi
-   if(TimeCurrent() - ExtLastHeartbeat >= 10)
+   // Pošalji heartbeat svakih 5 sekundi
+   if(TimeCurrent() - ExtLastHeartbeat >= 5)
    {
       SendHeartbeat();
       ExtLastHeartbeat = TimeCurrent();
@@ -122,10 +122,10 @@ bool HttpGet(string url, string &responseOut)
    char postData[];
    char resultData[];
    string resultHeaders;
-   string headers = "Accept: application/json\\r\\nUser-Agent: MT5-AITrader/2.0\\r\\n";
+   string headers = "Accept: application/json\\r\\nUser-Agent: MT5-AITrader/2.1\\r\\n";
    
    ResetLastError();
-   int res = WebRequest("GET", url, headers, 3000, postData, resultData, resultHeaders);
+   int res = WebRequest("GET", url, headers, 4000, postData, resultData, resultHeaders);
    
    if(res == -1)
    {
@@ -133,11 +133,11 @@ bool HttpGet(string url, string &responseOut)
       if(err == 4014) // ERR_WEBREQUEST_INVALID_ADDRESS
       {
          Print(">>> [MT5 Error 4014] URL nije dodat u 'Allowed WebRequest URLs' u MT5!");
-         Print(">>> Dodajte sledeći URL u Tools -> Options -> Expert Advisors: ", InpServerUrl);
+         Print(">>> Otvorite Tools -> Options -> Expert Advisors i dodajte URL: ", InpServerUrl);
       }
       else
       {
-         Print(">>> [MT5 WebRequest Error] Kod greške: ", err, " na URL: ", url);
+         Print(">>> [MT5 WebRequest GET Error] Kod greške: ", err, " na URL: ", url);
       }
       return false;
    }
@@ -148,29 +148,50 @@ bool HttpGet(string url, string &responseOut)
       return true;
    }
    
-   Print(">>> [Server HTTP Response] Status kod: ", res);
+   Print(">>> [Server HTTP Response GET] Status kod: ", res);
    return false;
 }
 
 //+------------------------------------------------------------------+
-//| HTTP POST helper funkcija                                        |
+//| HTTP POST helper funkcija sa bezbednim uklanjanjem null bajta    |
 //+------------------------------------------------------------------+
 bool HttpPost(string url, string jsonBody, string &responseOut)
 {
    char postData[];
    char resultData[];
    string resultHeaders;
-   string headers = "Content-Type: application/json\\r\\nAccept: application/json\\r\\nUser-Agent: MT5-AITrader/2.0\\r\\n";
+   string headers = "Content-Type: application/json\\r\\nAccept: application/json\\r\\nUser-Agent: MT5-AITrader/2.1\\r\\n";
    
-   StringToCharArray(jsonBody, postData, 0, StringLen(jsonBody), CP_UTF8);
+   // Kopiraj u UTF-8 i odseci završni \0 null-terminator kako Express ne bi vratio 400 Bad Request
+   int copied = StringToCharArray(jsonBody, postData, 0, WHOLE_ARRAY, CP_UTF8);
+   if(copied > 0 && postData[copied - 1] == 0)
+   {
+      ArrayResize(postData, copied - 1);
+   }
    
    ResetLastError();
-   int res = WebRequest("POST", url, headers, 3000, postData, resultData, resultHeaders);
+   int res = WebRequest("POST", url, headers, 4000, postData, resultData, resultHeaders);
+   if(res == -1)
+   {
+      int err = GetLastError();
+      if(err == 4014)
+      {
+         Print(">>> [MT5 Error 4014] URL nije dodat u 'Allowed WebRequest URLs' u MT5!");
+         Print(">>> Otvorite Tools -> Options -> Expert Advisors i dodajte: ", InpServerUrl);
+      }
+      else
+      {
+         Print(">>> [MT5 WebRequest POST Error] Kod greške: ", err, " na URL: ", url);
+      }
+      return false;
+   }
+   
    if(res >= 200 && res <= 204)
    {
       responseOut = CharArrayToString(resultData, 0, WHOLE_ARRAY, CP_UTF8);
       return true;
    }
+   Print(">>> [Server HTTP Response POST] Status kod: ", res);
    return false;
 }
 
@@ -179,8 +200,6 @@ bool HttpPost(string url, string jsonBody, string &responseOut)
 //+------------------------------------------------------------------+
 void SendHeartbeat()
 {
-   string url = InpServerUrl + "/api/mt5/heartbeat";
-   
    int totalPositions = PositionsTotal();
    int aiPositions = 0;
    for(int i = 0; i < totalPositions; i++)
@@ -203,8 +222,36 @@ void SendHeartbeat()
       aiPositions
    );
    
+   string postUrl = InpServerUrl + "/api/mt5/heartbeat";
    string resp;
-   HttpPost(url, payload, resp);
+   bool ok = HttpPost(postUrl, payload, resp);
+   
+   // Ako POST nije uspeo (npr. firewall restrikcija), pokreni siguran GET fallback
+   if(!ok)
+   {
+      string getUrl = StringFormat(
+         "%s/api/mt5/heartbeat?accountNumber=%d&broker=%s&balance=%.2f&equity=%.2f&margin=%.2f&freeMargin=%.2f&openPositionsCount=%d",
+         InpServerUrl,
+         (int)AccountInfoInteger(ACCOUNT_LOGIN),
+         AccountInfoString(ACCOUNT_COMPANY),
+         AccountInfoDouble(ACCOUNT_BALANCE),
+         AccountInfoDouble(ACCOUNT_EQUITY),
+         AccountInfoDouble(ACCOUNT_MARGIN),
+         AccountInfoDouble(ACCOUNT_MARGIN_FREE),
+         aiPositions
+      );
+      ok = HttpGet(getUrl, resp);
+   }
+   
+   if(ok)
+   {
+      static bool sFirstConnected = false;
+      if(!sFirstConnected)
+      {
+         Print(">>> [MT5 Bridge] USPEŠNO POVEZAN SA WEB BOTOM! (Balans: ", DoubleToString(AccountInfoDouble(ACCOUNT_BALANCE), 2), ")");
+         sFirstConnected = true;
+      }
+   }
 }
 
 //+------------------------------------------------------------------+
@@ -217,8 +264,6 @@ void PollSignalsFromServer()
    
    if(!HttpGet(url, response)) return;
    
-   // Obrada aktivnih trejdova iz JSON-a
-   // Format: {"activeTrades":[{id, symbol, mt5Symbol, type, entryPrice, stopLoss, takeProfit, lotSize}], "closedTrades":["id1", "id2"]}
    ProcessServerOrders(response);
 }
 
@@ -308,13 +353,38 @@ double ExtractJsonDouble(string json, string key)
 }
 
 //+------------------------------------------------------------------+
+//| Pametno pronalaženje simbola kod brokera (Vantage sufiksi)      |
+//+------------------------------------------------------------------+
+string ResolveBrokerSymbol(string standardSymbol)
+{
+   if(SymbolInfoInteger(standardSymbol, SYMBOL_SELECT)) return standardSymbol;
+   if(SymbolSelect(standardSymbol, true)) return standardSymbol;
+   
+   string clean = standardSymbol;
+   if(StringFind(clean, "USDT") >= 0)
+   {
+      StringReplace(clean, "USDT", "USD");
+      if(SymbolSelect(clean, true)) return clean;
+   }
+   
+   string suffixes[] = {"+", ".v", ".a", "m", "_pro", ".raw", ".ecn"};
+   for(int i = 0; i < ArraySize(suffixes); i++)
+   {
+      string testSym = clean + suffixes[i];
+      if(SymbolSelect(testSym, true)) return testSym;
+   }
+   return standardSymbol;
+}
+
+//+------------------------------------------------------------------+
 //| Otvaranje ili Ažuriranje Stop Loss-a postojeće pozicije          |
 //+------------------------------------------------------------------+
 void ExecuteOrSyncTrade(string tradeJson)
 {
    string id        = ExtractJsonString(tradeJson, "id");
-   string symbol    = ExtractJsonString(tradeJson, "mt5Symbol");
-   if(symbol == "") symbol = ExtractJsonString(tradeJson, "symbol");
+   string rawSym    = ExtractJsonString(tradeJson, "mt5Symbol");
+   if(rawSym == "") rawSym = ExtractJsonString(tradeJson, "symbol");
+   string symbol    = ResolveBrokerSymbol(rawSym);
    string typeStr   = ExtractJsonString(tradeJson, "type");
    
    double entry     = ExtractJsonDouble(tradeJson, "entryPrice");

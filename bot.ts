@@ -55,8 +55,19 @@ export function findSupportResistance(klines: Kline[]): SRLevels {
   return { supports, resistances };
 }
 
-// 6 Top-Tier Liquid Crypto Pairs (Replaced illiquid EURUSDT and PAXGUSDT with BNBUSDT and DOGEUSDT)
-export const PAIRS = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT', 'XRPUSDT', 'DOGEUSDT'];
+// 6 Top-Tier Liquid Crypto Pairs (Vantage MT5 format: BTCUSD, ETHUSD, SOLUSD, BNBUSD, XRPUSD, DOGEUSD)
+export const PAIRS = ['BTCUSD', 'ETHUSD', 'SOLUSD', 'BNBUSD', 'XRPUSD', 'DOGEUSD'];
+
+export const toBinanceSymbol = (p: string): string => {
+  if (p.endsWith('USDT')) return p;
+  if (p.endsWith('USD')) return `${p}T`;
+  return `${p}USDT`;
+};
+
+export const fromBinanceSymbol = (s: string): string => {
+  if (s.endsWith('USDT')) return s.slice(0, -1);
+  return s;
+};
 
 export class TradingBot {
   private ws!: WebSocket;
@@ -117,7 +128,8 @@ export class TradingBot {
     setInterval(async () => {
       for (const p of PAIRS) {
         try {
-          const res = await fetch(`https://fapi.binance.com/fapi/v1/premiumIndex?symbol=${p}`);
+          const binanceSym = toBinanceSymbol(p);
+          const res = await fetch(`https://fapi.binance.com/fapi/v1/premiumIndex?symbol=${binanceSym}`);
           const data = await res.json();
           if (data && data.lastFundingRate) {
             this.fundingRates[p] = parseFloat(data.lastFundingRate);
@@ -130,14 +142,15 @@ export class TradingBot {
   }
 
   private startOrderBookMonitor() {
-    const streams = PAIRS.map(p => `${p.toLowerCase()}@depth10@100ms`).join('/');
+    const streams = PAIRS.map(p => `${toBinanceSymbol(p).toLowerCase()}@depth10@100ms`).join('/');
     const obWs = new WebSocket(`wss://stream.binance.com:9443/stream?streams=${streams}`);
     
     obWs.on('message', (data: Buffer) => {
       try {
         const payload = JSON.parse(data.toString());
         if (!payload.data || !payload.data.bids || !payload.data.asks) return;
-        const symbol = payload.data.s; // e.g., BTCUSDT
+        const binanceSymbol = payload.data.s; // e.g., BTCUSDT
+        const symbol = fromBinanceSymbol(binanceSymbol); // e.g., BTCUSD
         const bids = payload.data.bids as [string, string][];
         const asks = payload.data.asks as [string, string][];
         
@@ -161,7 +174,10 @@ export class TradingBot {
   }
 
   private connectWebsocket() {
-    const streams = PAIRS.map(p => `${p.toLowerCase()}@kline_5m/${p.toLowerCase()}@kline_15m/${p.toLowerCase()}@kline_1h`).join('/');
+    const streams = PAIRS.map(p => {
+      const b = toBinanceSymbol(p).toLowerCase();
+      return `${b}@kline_5m/${b}@kline_15m/${b}@kline_1h`;
+    }).join('/');
     this.ws = new WebSocket(`wss://stream.binance.com:9443/stream?streams=${streams}`);
 
     this.ws.on('message', (data: Buffer) => {
@@ -169,7 +185,8 @@ export class TradingBot {
         const payload = JSON.parse(data.toString());
         if (!payload.data || !payload.data.k) return;
         
-        const symbol = payload.data.s;
+        const binanceSymbol = payload.data.s;
+        const symbol = fromBinanceSymbol(binanceSymbol);
         const kline = payload.data.k;
         const interval = kline.i;
         const currentPrice = parseFloat(kline.c);
