@@ -72,6 +72,21 @@ input double InpFallbackLot        = 0.01;               // Podrazumevani Lot ak
 CTrade         ExtTrade;
 datetime       ExtLastHeartbeat = 0;
 string         ExtActiveTradeIds[];
+string         gServerUrl = "";
+
+string CleanServerUrl(string u)
+{
+   while(StringLen(u) > 0 && (StringSubstr(u, StringLen(u) - 1, 1) == "/" || StringSubstr(u, StringLen(u) - 1, 1) == "\\"))
+   {
+      u = StringSubstr(u, 0, StringLen(u) - 1);
+   }
+   int apiPos = StringFind(u, "/api");
+   if(apiPos > 0)
+   {
+      u = StringSubstr(u, 0, apiPos);
+   }
+   return u;
+}
 
 //+------------------------------------------------------------------+
 //| Expert initialization function                                   |
@@ -82,8 +97,9 @@ int OnInit()
    ExtTrade.SetDeviationInPoints(InpDeviation);
    ExtTrade.SetTypeFilling(ORDER_FILLING_IOC);
    
-   Print(">>> [AI Trader MT5 Bridge v2.1] Pokrenut za server: ", InpServerUrl);
-   Print(">>> VAŽNO: Proverite da li je u MT5: Tools -> Options -> Expert Advisors -> 'Allow WebRequest' dodat tačan URL: ", InpServerUrl);
+   gServerUrl = CleanServerUrl(InpServerUrl);
+   Print(">>> [AI Trader MT5 Bridge v2.1] Pokrenut. Server URL: ", gServerUrl);
+   Print(">>> Proverite da li je u MT5: Tools -> Options -> Expert Advisors -> 'Allow WebRequest' dodat tačan URL: ", gServerUrl);
    
    EventSetTimer(InpTimerSeconds);
    SendHeartbeat();
@@ -133,7 +149,7 @@ bool HttpGet(string url, string &responseOut)
       if(err == 4014) // ERR_WEBREQUEST_INVALID_ADDRESS
       {
          Print(">>> [MT5 Error 4014] URL nije dodat u 'Allowed WebRequest URLs' u MT5!");
-         Print(">>> Otvorite Tools -> Options -> Expert Advisors i dodajte URL: ", InpServerUrl);
+         Print(">>> Otvorite Tools -> Options -> Expert Advisors i dodajte URL: ", gServerUrl);
       }
       else
       {
@@ -148,7 +164,11 @@ bool HttpGet(string url, string &responseOut)
       return true;
    }
    
-   Print(">>> [Server HTTP Response GET] Status kod: ", res);
+   Print(">>> [Server HTTP Response GET] Status kod: ", res, " za URL: ", url);
+   if(res == 404)
+   {
+      Print(">>> [PAŽNJA 404] URL servera ne postoji ili nije aktivan. Proverite URL u InpServerUrl i 'Tools -> Options -> Expert Advisors'!");
+   }
    return false;
 }
 
@@ -162,7 +182,7 @@ bool HttpPost(string url, string jsonBody, string &responseOut)
    string resultHeaders;
    string headers = "Content-Type: application/json\\r\\nAccept: application/json\\r\\nUser-Agent: MT5-AITrader/2.1\\r\\n";
    
-   // Kopiraj u UTF-8 i odseci završni \0 null-terminator kako Express ne bi vratio 400 Bad Request
+   // Kopiraj u UTF-8 i odseci završni \\0 null-terminator kako Express ne bi vratio 400 Bad Request
    int copied = StringToCharArray(jsonBody, postData, 0, WHOLE_ARRAY, CP_UTF8);
    if(copied > 0 && postData[copied - 1] == 0)
    {
@@ -177,7 +197,7 @@ bool HttpPost(string url, string jsonBody, string &responseOut)
       if(err == 4014)
       {
          Print(">>> [MT5 Error 4014] URL nije dodat u 'Allowed WebRequest URLs' u MT5!");
-         Print(">>> Otvorite Tools -> Options -> Expert Advisors i dodajte: ", InpServerUrl);
+         Print(">>> Otvorite Tools -> Options -> Expert Advisors i dodajte URL: ", gServerUrl);
       }
       else
       {
@@ -191,7 +211,11 @@ bool HttpPost(string url, string jsonBody, string &responseOut)
       responseOut = CharArrayToString(resultData, 0, WHOLE_ARRAY, CP_UTF8);
       return true;
    }
-   Print(">>> [Server HTTP Response POST] Status kod: ", res);
+   Print(">>> [Server HTTP Response POST] Status kod: ", res, " za URL: ", url);
+   if(res == 404)
+   {
+      Print(">>> [PAŽNJA 404] URL servera ne postoji ili nije aktivan. Proverite URL u InpServerUrl i 'Tools -> Options -> Expert Advisors'!");
+   }
    return false;
 }
 
@@ -222,7 +246,7 @@ void SendHeartbeat()
       aiPositions
    );
    
-   string postUrl = InpServerUrl + "/api/mt5/heartbeat";
+   string postUrl = gServerUrl + "/api/mt5/heartbeat";
    string resp;
    bool ok = HttpPost(postUrl, payload, resp);
    
@@ -231,7 +255,7 @@ void SendHeartbeat()
    {
       string getUrl = StringFormat(
          "%s/api/mt5/heartbeat?accountNumber=%d&broker=%s&balance=%.2f&equity=%.2f&margin=%.2f&freeMargin=%.2f&openPositionsCount=%d",
-         InpServerUrl,
+         gServerUrl,
          (int)AccountInfoInteger(ACCOUNT_LOGIN),
          AccountInfoString(ACCOUNT_COMPANY),
          AccountInfoDouble(ACCOUNT_BALANCE),
@@ -259,7 +283,7 @@ void SendHeartbeat()
 //+------------------------------------------------------------------+
 void PollSignalsFromServer()
 {
-   string url = InpServerUrl + "/api/mt5/poll";
+   string url = gServerUrl + "/api/mt5/poll";
    string response;
    
    if(!HttpGet(url, response)) return;

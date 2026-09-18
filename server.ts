@@ -4,6 +4,7 @@ import { DatabaseSync } from "node:sqlite";
 import { createServer as createViteServer } from "vite";
 import { TradingBot } from './bot';
 import { DEFAULT_MT5_CONFIG, generateMql5EACode, MT5Config, MT5Heartbeat } from './src/mt5_bridge';
+import { startCloudflareTunnel, getTunnelUrl } from './src/tunnel';
 
 
 const db = new DatabaseSync("./trades.db");
@@ -276,12 +277,16 @@ async function startServer() {
       const protocol = req.headers['x-forwarded-proto'] || req.protocol || 'http';
       const host = req.headers['x-forwarded-host'] || req.get('host') || 'localhost:3000';
       const currentOrigin = `${protocol}://${host}`;
+      const liveTunnel = getTunnelUrl();
+      const configuredUrl = config.serverUrl && config.serverUrl.trim() !== '' ? config.serverUrl.trim() : null;
+      const resolvedServerUrl = configuredUrl || (currentOrigin.includes('run.app') ? (liveTunnel || currentOrigin) : currentOrigin);
 
       res.json({
         config: {
           ...config,
-          serverUrl: config.serverUrl || currentOrigin
+          serverUrl: resolvedServerUrl
         },
+        tunnelUrl: liveTunnel,
         status: {
           connected: !!isConnected,
           lastHeartbeat: stateRow ? stateRow.lastHeartbeat : 0,
@@ -309,6 +314,15 @@ async function startServer() {
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
+  });
+
+  // 2b. Check Public Tunnel Status
+  app.get("/api/mt5/tunnel", (req, res) => {
+    const liveTunnel = getTunnelUrl();
+    res.json({
+      tunnelUrl: liveTunnel,
+      active: !!liveTunnel
+    });
   });
 
   // 3. Polling Endpoint for MQL5 Expert Advisor
@@ -386,9 +400,14 @@ async function startServer() {
   // 5. Download / Fetch Generated MQL5 EA Code
   app.get("/api/mt5/ea-code", (req, res) => {
     try {
+      const configRow = db.prepare("SELECT config FROM mt5_settings WHERE id = 'main'").get() as any;
+      const config: MT5Config = configRow ? JSON.parse(configRow.config) : DEFAULT_MT5_CONFIG;
+      const liveTunnel = getTunnelUrl();
       const protocol = req.headers['x-forwarded-proto'] || req.protocol || 'http';
       const host = req.headers['x-forwarded-host'] || req.get('host') || 'localhost:3000';
-      const origin = `${protocol}://${host}`;
+      const currentOrigin = `${protocol}://${host}`;
+      const configuredUrl = config.serverUrl && config.serverUrl.trim() !== '' ? config.serverUrl.trim() : null;
+      const origin = configuredUrl || (currentOrigin.includes('run.app') ? (liveTunnel || currentOrigin) : currentOrigin);
       
       const eaSource = generateMql5EACode(origin);
       res.setHeader('Content-Type', 'text/plain; charset=utf-8');
@@ -400,9 +419,14 @@ async function startServer() {
 
   app.get("/api/mt5/download-ea", (req, res) => {
     try {
+      const configRow = db.prepare("SELECT config FROM mt5_settings WHERE id = 'main'").get() as any;
+      const config: MT5Config = configRow ? JSON.parse(configRow.config) : DEFAULT_MT5_CONFIG;
+      const liveTunnel = getTunnelUrl();
       const protocol = req.headers['x-forwarded-proto'] || req.protocol || 'http';
       const host = req.headers['x-forwarded-host'] || req.get('host') || 'localhost:3000';
-      const origin = `${protocol}://${host}`;
+      const currentOrigin = `${protocol}://${host}`;
+      const configuredUrl = config.serverUrl && config.serverUrl.trim() !== '' ? config.serverUrl.trim() : null;
+      const origin = configuredUrl || (currentOrigin.includes('run.app') ? (liveTunnel || currentOrigin) : currentOrigin);
       
       const eaSource = generateMql5EACode(origin);
       res.setHeader('Content-Disposition', 'attachment; filename="AITrader_MT5_Bridge.mq5"');
@@ -433,6 +457,9 @@ async function startServer() {
 
   app.listen(PORT, "0.0.0.0", () => {
     console.log(`Server running on http://localhost:${PORT}`);
+    startCloudflareTunnel(PORT).catch(err => {
+      console.error("[Server] Tunnel startup error:", err?.message || err);
+    });
   });
 }
 
