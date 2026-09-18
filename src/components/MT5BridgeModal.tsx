@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { 
   X, Check, Copy, Download, RefreshCw, Server, ShieldCheck, 
-  AlertCircle, ArrowRight, ExternalLink, Cpu, Sliders, FileCode, CheckCircle2 
+  AlertCircle, ArrowRight, ExternalLink, Cpu, Sliders, FileCode, CheckCircle2, Save 
 } from 'lucide-react';
 import { PAIRS } from '../types';
 import { generateMql5EACode } from '../mt5_bridge';
