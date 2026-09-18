@@ -297,8 +297,11 @@ async function startServer() {
       const host = req.headers['x-forwarded-host'] || req.get('host') || 'localhost:3000';
       const currentOrigin = `${protocol}://${host}`;
       const liveTunnel = getTunnelUrl();
-      const configuredUrl = config.serverUrl && config.serverUrl.trim() !== '' ? config.serverUrl.trim() : null;
-      const resolvedServerUrl = configuredUrl || (currentOrigin.includes('run.app') ? (liveTunnel || currentOrigin) : currentOrigin);
+      let configuredUrl = config.serverUrl && config.serverUrl.trim() !== '' ? config.serverUrl.trim() : null;
+      if (configuredUrl && configuredUrl.includes('92.5.176.43:3000')) {
+        configuredUrl = 'http://92.5.176.43';
+      }
+      const resolvedServerUrl = configuredUrl || (currentOrigin.includes('92.5.176.43') ? 'http://92.5.176.43' : (currentOrigin.includes('run.app') ? (liveTunnel || currentOrigin) : currentOrigin));
 
       res.json({
         config: {
@@ -425,8 +428,11 @@ async function startServer() {
       const protocol = req.headers['x-forwarded-proto'] || req.protocol || 'http';
       const host = req.headers['x-forwarded-host'] || req.get('host') || 'localhost:3000';
       const currentOrigin = `${protocol}://${host}`;
-      const configuredUrl = config.serverUrl && config.serverUrl.trim() !== '' ? config.serverUrl.trim() : null;
-      const origin = configuredUrl || (currentOrigin.includes('run.app') ? (liveTunnel || currentOrigin) : currentOrigin);
+      let configuredUrl = config.serverUrl && config.serverUrl.trim() !== '' ? config.serverUrl.trim() : null;
+      if (configuredUrl && configuredUrl.includes('92.5.176.43:3000')) {
+        configuredUrl = 'http://92.5.176.43';
+      }
+      const origin = configuredUrl || (currentOrigin.includes('92.5.176.43') ? 'http://92.5.176.43' : (currentOrigin.includes('run.app') ? (liveTunnel || currentOrigin) : currentOrigin));
       
       const eaSource = generateMql5EACode(origin);
       res.setHeader('Content-Type', 'text/plain; charset=utf-8');
@@ -444,8 +450,11 @@ async function startServer() {
       const protocol = req.headers['x-forwarded-proto'] || req.protocol || 'http';
       const host = req.headers['x-forwarded-host'] || req.get('host') || 'localhost:3000';
       const currentOrigin = `${protocol}://${host}`;
-      const configuredUrl = config.serverUrl && config.serverUrl.trim() !== '' ? config.serverUrl.trim() : null;
-      const origin = configuredUrl || (currentOrigin.includes('run.app') ? (liveTunnel || currentOrigin) : currentOrigin);
+      let configuredUrl = config.serverUrl && config.serverUrl.trim() !== '' ? config.serverUrl.trim() : null;
+      if (configuredUrl && configuredUrl.includes('92.5.176.43:3000')) {
+        configuredUrl = 'http://92.5.176.43';
+      }
+      const origin = configuredUrl || (currentOrigin.includes('92.5.176.43') ? 'http://92.5.176.43' : (currentOrigin.includes('run.app') ? (liveTunnel || currentOrigin) : currentOrigin));
       
       const eaSource = generateMql5EACode(origin);
       res.setHeader('Content-Disposition', 'attachment; filename="AITrader_MT5_Bridge.mq5"');

@@ -22,7 +22,7 @@ export interface MT5Heartbeat {
 
 export const DEFAULT_MT5_CONFIG: MT5Config = {
   enabled: true,
-  serverUrl: "",
+  serverUrl: "http://92.5.176.43",
   magicNumber: 889900,
   slippagePoints: 50,
   lotSizes: {
@@ -44,7 +44,11 @@ export const DEFAULT_MT5_CONFIG: MT5Config = {
 };
 
 export function generateMql5EACode(serverBaseUrl: string): string {
-  const cleanUrl = serverBaseUrl.replace(/\/$/, "");
+  let cleanUrl = (serverBaseUrl || "http://92.5.176.43").trim().replace(/\/$/, "");
+  // Replace legacy port 3000 on Oracle IP with clean port 80 URL for MT5 WebRequest compatibility
+  if (cleanUrl.includes("92.5.176.43:3000")) {
+    cleanUrl = "http://92.5.176.43";
+  }
   return `//+------------------------------------------------------------------+
 //|                                           AITrader_MT5_Bridge.mq5 |
 //|                             Copyright 2026, AI Trading System     |
@@ -59,7 +63,7 @@ export function generateMql5EACode(serverBaseUrl: string): string {
 
 //--- Input Parameters
 input group "=== Server Bridge Connection ==="
-input string InpServerUrl       = "${cleanUrl}"; // Server Web API URL (Bez kose crte na kraju)
+input string InpServerUrl       = "${cleanUrl}"; // Server Web API URL (Standardni Port 80, Bez kose crte na kraju)
 input int    InpTimerSeconds    = 1;                     // Polling Interval (sekunde)
 input ulong  InpMagicNumber     = 889900;                // Magic Number za pozicije
 input ulong  InpDeviation       = 50;                    // Maksimalno odstupanje / Slippage (poena)

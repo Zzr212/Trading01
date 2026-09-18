@@ -96,12 +96,14 @@ export const MT5BridgeModal: React.FC<MT5BridgeModalProps> = ({ isOpen, onClose 
           );
           
           // Determine the most reliable URL:
-          // 1. If user already saved a custom serverUrl (that is not an expired trycloudflare tunnel), keep it
-          // 2. If running on Oracle VPS (direct IP origin), use current origin (e.g. http://92.5.176.43:3000)
-          // 3. If running inside Cloud Run preview (*.run.app), prefer the live tunnel if available
+          // 1. If user has Oracle VPS or 92.5.176.43, use clean port 80 (http://92.5.176.43)
+          // 2. If user already saved a custom serverUrl, keep it (cleaning any legacy :3000 on Oracle IP)
+          // 3. If running inside Cloud Run preview (*.run.app), prefer live tunnel or Oracle IP
           let resolvedUrl = data.config.serverUrl || window.location.origin;
-          if (isIpOrLocal) {
-            resolvedUrl = window.location.origin;
+          if (resolvedUrl && resolvedUrl.includes('92.5.176.43')) {
+            resolvedUrl = 'http://92.5.176.43';
+          } else if (isIpOrLocal) {
+            resolvedUrl = window.location.origin.includes('92.5.176.43') ? 'http://92.5.176.43' : window.location.origin;
           } else if (data.config.serverUrl && !data.config.serverUrl.includes('trycloudflare')) {
             resolvedUrl = data.config.serverUrl;
           } else if (isCloudRun && data.tunnelUrl) {
@@ -113,7 +115,7 @@ export const MT5BridgeModal: React.FC<MT5BridgeModalProps> = ({ isOpen, onClose 
           setConfig(prev => ({
             ...prev,
             ...data.config,
-            serverUrl: prev.serverUrl && !isInitial ? prev.serverUrl : resolvedUrl
+            serverUrl: prev.serverUrl && !isInitial ? (prev.serverUrl.includes('92.5.176.43:3000') ? 'http://92.5.176.43' : prev.serverUrl) : resolvedUrl
           }));
 
           if (isInitial) {
@@ -413,13 +415,13 @@ export const MT5BridgeModal: React.FC<MT5BridgeModalProps> = ({ isOpen, onClose 
                   <button
                     type="button"
                     onClick={() => {
-                      const oracleUrl = 'http://92.5.176.43:3000';
+                      const oracleUrl = 'http://92.5.176.43';
                       setConfig(prev => ({ ...prev, serverUrl: oracleUrl }));
                       setEaCode(generateMql5EACode(oracleUrl));
                     }}
                     className="px-2.5 py-1 rounded bg-neutral-800 hover:bg-neutral-700 text-emerald-400 border border-neutral-700 text-[11px] font-mono transition-colors flex items-center gap-1 cursor-pointer"
                   >
-                    <span>⚡ Preporuka: Direktni Oracle VPS (http://92.5.176.43:3000)</span>
+                    <span>⚡ Preporuka: Direktni Oracle VPS (http://92.5.176.43 - Port 80)</span>
                   </button>
                   {tunnelUrl && (
                     <button
@@ -443,16 +445,16 @@ export const MT5BridgeModal: React.FC<MT5BridgeModalProps> = ({ isOpen, onClose 
                   </div>
                   <ul className="list-disc list-inside space-y-1 text-neutral-400 pl-1">
                     <li>
-                      <strong className="text-neutral-200">Tačan format adrese:</strong> Koristite isključivo <span className="text-emerald-400 font-mono">http://TVOJ_ORACLE_IP:3000</span> (bez kose crte na kraju i bez <span className="font-mono text-neutral-300">/api</span>).
+                      <strong className="text-neutral-200">Tačan format adrese:</strong> Koristite <span className="text-emerald-400 font-mono">http://92.5.176.43</span> (standardni port 80, bez dodavanja porta :3000 i bez <span className="font-mono text-neutral-300">/api</span>).
                     </li>
                     <li>
-                      <strong className="text-neutral-200">Zašto je pisalo "Status kod: 404"?</strong> Ako ste u MT5 upisali npr. <span className="text-amber-400 font-mono">http://.../api</span>, MT5 je tražio <span className="font-mono text-neutral-300">.../api/api/mt5/heartbeat</span> što ne postoji na serveru. Naš novi MQL5 kod sada automatski čisti adresu funkcijom <span className="text-emerald-400 font-mono">CleanServerUrl</span>.
+                      <strong className="text-neutral-200">Zašto je preporučeno port 80?</strong> Standardni web port 80 prolazi bez ikakvih restrikcija u MT5 WebRequest-u i Windows firewall-u.
                     </li>
                     <li>
-                      <strong className="text-neutral-200">U MT5 dozvolite WebRequest:</strong> U MT5 idite u <em>Tools → Options → Expert Advisors</em>, označite <em>Allow WebRequest for listed URL</em> i dodajte: <span className="text-emerald-400 font-mono">{config.serverUrl || 'http://TVOJ_ORACLE_IP:3000'}</span>.
+                      <strong className="text-neutral-200">U MT5 dozvolite WebRequest:</strong> U MT5 idite u <em>Tools → Options → Expert Advisors</em>, označite <em>Allow WebRequest for listed URL</em> i dodajte: <span className="text-emerald-400 font-mono">{config.serverUrl || 'http://92.5.176.43'}</span>.
                     </li>
                     <li>
-                      <strong className="text-neutral-200">Oracle Cloud Firewall:</strong> Na Oracle konzoli (VCN Security Lists) proverite da je otvoren Ingress za TCP port <span className="font-mono text-neutral-300">3000</span>.
+                      <strong className="text-neutral-200">Oracle Cloud Firewall / NGINX:</strong> Proverite da je na VPS-u NGINX ili server prosleđen na port <span className="font-mono text-neutral-300">80</span> i otvoren u Security Listama.
                     </li>
                   </ul>
                 </div>
