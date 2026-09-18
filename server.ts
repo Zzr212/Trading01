@@ -3,6 +3,7 @@ import path from "path";
 import { DatabaseSync } from "node:sqlite";
 import { createServer as createViteServer } from "vite";
 import { TradingBot } from './bot';
+import { DEFAULT_MT5_CONFIG, generateMql5EACode, MT5Config, MT5Heartbeat } from './mt5_bridge';
 
 
 const db = new DatabaseSync("./trades.db");
@@ -48,6 +49,31 @@ db.exec(`CREATE TABLE IF NOT EXISTS trade_reviews (
   tradeId TEXT PRIMARY KEY,
   candles TEXT
 )`);
+
+db.exec(`CREATE TABLE IF NOT EXISTS mt5_settings (
+  id TEXT PRIMARY KEY,
+  config TEXT
+)`);
+
+db.exec(`CREATE TABLE IF NOT EXISTS mt5_state (
+  id TEXT PRIMARY KEY,
+  lastHeartbeat INTEGER,
+  accountNumber TEXT,
+  broker TEXT,
+  balance REAL,
+  equity REAL,
+  margin REAL,
+  freeMargin REAL,
+  openPositionsCount INTEGER
+)`);
+
+// Seed default MT5 settings if not present
+try {
+  const existingConfig = db.prepare("SELECT config FROM mt5_settings WHERE id = 'main'").get() as any;
+  if (!existingConfig) {
+    db.prepare("INSERT INTO mt5_settings (id, config) VALUES ('main', ?)").run(JSON.stringify(DEFAULT_MT5_CONFIG));
+  }
+} catch(e) {}
 
 async function startServer() {
   const bot = new TradingBot(db);
@@ -203,6 +229,142 @@ async function startServer() {
       `);
       
       res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // ==========================================
+  // METATRADER 5 (MT5) BRIDGE API ENDPOINTS
+  // ==========================================
+
+  // 1. Get MT5 Configuration & Connection Status
+  app.get("/api/mt5/config", (req, res) => {
+    try {
+      const row = db.prepare("SELECT config FROM mt5_settings WHERE id = 'main'").get() as any;
+      const stateRow = db.prepare("SELECT * FROM mt5_state WHERE id = 'main'").get() as any;
+      
+      const config: MT5Config = row ? JSON.parse(row.config) : DEFAULT_MT5_CONFIG;
+      const isConnected = stateRow && (Date.now() - stateRow.lastHeartbeat < 30000); // 30s timeout
+
+      // Auto-detect server base url if not set
+      const protocol = req.headers['x-forwarded-proto'] || req.protocol || 'http';
+      const host = req.headers['x-forwarded-host'] || req.get('host') || 'localhost:3000';
+      const currentOrigin = `${protocol}://${host}`;
+
+      res.json({
+        config: {
+          ...config,
+          serverUrl: config.serverUrl || currentOrigin
+        },
+        status: {
+          connected: !!isConnected,
+          lastHeartbeat: stateRow ? stateRow.lastHeartbeat : 0,
+          accountNumber: stateRow ? stateRow.accountNumber : null,
+          broker: stateRow ? stateRow.broker : null,
+          balance: stateRow ? stateRow.balance : 0,
+          equity: stateRow ? stateRow.equity : 0,
+          margin: stateRow ? stateRow.margin : 0,
+          freeMargin: stateRow ? stateRow.freeMargin : 0,
+          openPositionsCount: stateRow ? stateRow.openPositionsCount : 0
+        }
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // 2. Save MT5 Configuration (Lots, Mappings, etc.)
+  app.post("/api/mt5/config", (req, res) => {
+    try {
+      const newConfig = req.body;
+      const stmt = db.prepare("INSERT OR REPLACE INTO mt5_settings (id, config) VALUES ('main', ?)");
+      stmt.run(JSON.stringify(newConfig));
+      res.json({ success: true, config: newConfig });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // 3. Polling Endpoint for MQL5 Expert Advisor
+  // Returns active trades that need to be opened/trailed, and closed trades that need to be exited
+  app.get("/api/mt5/poll", (req, res) => {
+    try {
+      const configRow = db.prepare("SELECT config FROM mt5_settings WHERE id = 'main'").get() as any;
+      const config: MT5Config = configRow ? JSON.parse(configRow.config) : DEFAULT_MT5_CONFIG;
+
+      // Active trades in bot
+      const activeRows = db.prepare("SELECT * FROM trades WHERE status = 'ACTIVE'").all() as any[];
+      
+      // Closed trades in the last 2 hours (to ensure MT5 closes any matching positions)
+      const twoHoursAgo = Date.now() - (2 * 60 * 60 * 1000);
+      const closedRows = db.prepare("SELECT id FROM trades WHERE status IN ('WON', 'LOST') AND closeTimestamp >= ?").all(twoHoursAgo) as any[];
+
+      const activeTradesPayload = activeRows.map(t => {
+        const mt5Symbol = config.symbolMappings[t.pair] || t.pair;
+        const lotSize = config.lotSizes[t.pair] || 0.01;
+        return {
+          id: t.id,
+          symbol: t.pair,
+          mt5Symbol: mt5Symbol,
+          type: t.type, // 'LONG' or 'SHORT'
+          entryPrice: t.entryPrice,
+          stopLoss: t.stopLoss,
+          takeProfit: t.takeProfit,
+          tp1Price: t.tp1Price,
+          tp1Hit: !!t.tp1Hit,
+          lotSize: lotSize,
+          timestamp: t.timestamp
+        };
+      });
+
+      res.json({
+        success: true,
+        serverTime: Date.now(),
+        activeTrades: activeTradesPayload,
+        closedTrades: closedRows.map(r => r.id)
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // 4. Heartbeat from MT5 Expert Advisor (Terminal Telemetry)
+  app.post("/api/mt5/heartbeat", (req, res) => {
+    try {
+      const hb: MT5Heartbeat = req.body;
+      const stmt = db.prepare(`
+        INSERT OR REPLACE INTO mt5_state (
+          id, lastHeartbeat, accountNumber, broker, balance, equity, margin, freeMargin, openPositionsCount
+        ) VALUES ('main', ?, ?, ?, ?, ?, ?, ?, ?)
+      `);
+      stmt.run(
+        Date.now(),
+        hb.accountNumber || "Unknown",
+        hb.broker || "Vantage",
+        hb.balance || 0,
+        hb.equity || 0,
+        hb.margin || 0,
+        hb.freeMargin || 0,
+        hb.openPositionsCount || 0
+      );
+      res.json({ success: true, acknowledged: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // 5. Download / Fetch Generated MQL5 EA Code
+  app.get("/api/mt5/ea-code", (req, res) => {
+    try {
+      const protocol = req.headers['x-forwarded-proto'] || req.protocol || 'http';
+      const host = req.headers['x-forwarded-host'] || req.get('host') || 'localhost:3000';
+      const origin = `${protocol}://${host}`;
+      
+      const eaSource = generateMql5EACode(origin);
+      res.setHeader('Content-Disposition', 'attachment; filename="AITrader_MT5_Bridge.mq5"');
+      res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+      res.send(eaSource);
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }

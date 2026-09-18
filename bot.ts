@@ -335,13 +335,17 @@ export class TradingBot {
         }
       }
 
-      // Trailing Stop if profit reaches 75% of TP
+      // Trailing Stop if profit reaches 75% of TP: Strictly bounded below current price and below Take-Profit
       if (tpDistance > 0 && profitDistance >= tpDistance * 0.75) {
-        const trailedSL = parseFloat((currentPrice - (initialRisk * 0.5)).toFixed(4));
-        if (trailedSL > activeTrade.stopLoss) {
-          activeTrade.stopLoss = trailedSL;
+        const rawTrailed = currentPrice - (initialRisk * 0.5);
+        // MT5 Guard: SL must be strictly below currentPrice and strictly below takeProfit
+        const maxAllowedLongSL = Math.min(currentPrice * 0.998, activeTrade.takeProfit * 0.998);
+        const validTrailedSL = parseFloat(Math.min(rawTrailed, maxAllowedLongSL).toFixed(4));
+        
+        if (validTrailedSL > activeTrade.stopLoss && validTrailedSL < currentPrice) {
+          activeTrade.stopLoss = validTrailedSL;
           this.db.prepare("UPDATE trades SET stopLoss = ? WHERE id = ?").run(activeTrade.stopLoss, activeTrade.id);
-          console.log(`[Trailing SL Activated] ${symbol} LONG: Stop Loss trailed to $${activeTrade.stopLoss}`);
+          console.log(`[Trailing SL Activated] ${symbol} LONG: Stop Loss safely trailed to $${activeTrade.stopLoss}`);
         }
       }
     } else { // SHORT
@@ -358,13 +362,17 @@ export class TradingBot {
         }
       }
 
-      // Trailing Stop if profit reaches 75% of TP
+      // Trailing Stop if profit reaches 75% of TP: Strictly bounded above current price and above Take-Profit
       if (tpDistance > 0 && profitDistance >= tpDistance * 0.75) {
-        const trailedSL = parseFloat((currentPrice + (initialRisk * 0.5)).toFixed(4));
-        if (trailedSL < activeTrade.stopLoss) {
-          activeTrade.stopLoss = trailedSL;
+        const rawTrailed = currentPrice + (initialRisk * 0.5);
+        // MT5 Guard: SL must be strictly above currentPrice and strictly above takeProfit
+        const minAllowedShortSL = Math.max(currentPrice * 1.002, activeTrade.takeProfit * 1.002);
+        const validTrailedSL = parseFloat(Math.max(rawTrailed, minAllowedShortSL).toFixed(4));
+
+        if (validTrailedSL < activeTrade.stopLoss && validTrailedSL > currentPrice) {
+          activeTrade.stopLoss = validTrailedSL;
           this.db.prepare("UPDATE trades SET stopLoss = ? WHERE id = ?").run(activeTrade.stopLoss, activeTrade.id);
-          console.log(`[Trailing SL Activated] ${symbol} SHORT: Stop Loss trailed to $${activeTrade.stopLoss}`);
+          console.log(`[Trailing SL Activated] ${symbol} SHORT: Stop Loss safely trailed to $${activeTrade.stopLoss}`);
         }
       }
     }
