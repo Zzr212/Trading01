@@ -3,7 +3,7 @@ import path from "path";
 import { DatabaseSync } from "node:sqlite";
 import { createServer as createViteServer } from "vite";
 import { TradingBot } from './bot';
-import { DEFAULT_MT5_CONFIG, generateMql5EACode, MT5Config, MT5Heartbeat } from './mt5_bridge';
+import { DEFAULT_MT5_CONFIG, generateMql5EACode, MT5Config, MT5Heartbeat } from './src/mt5_bridge';
 
 
 const db = new DatabaseSync("./trades.db");
@@ -356,6 +356,20 @@ async function startServer() {
 
   // 5. Download / Fetch Generated MQL5 EA Code
   app.get("/api/mt5/ea-code", (req, res) => {
+    try {
+      const protocol = req.headers['x-forwarded-proto'] || req.protocol || 'http';
+      const host = req.headers['x-forwarded-host'] || req.get('host') || 'localhost:3000';
+      const origin = `${protocol}://${host}`;
+      
+      const eaSource = generateMql5EACode(origin);
+      res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+      res.send(eaSource);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/mt5/download-ea", (req, res) => {
     try {
       const protocol = req.headers['x-forwarded-proto'] || req.protocol || 'http';
       const host = req.headers['x-forwarded-host'] || req.get('host') || 'localhost:3000';

@@ -4,6 +4,7 @@ import {
   AlertCircle, ArrowRight, ExternalLink, Cpu, Sliders, FileCode, CheckCircle2 
 } from 'lucide-react';
 import { PAIRS } from '../types';
+import { generateMql5EACode } from '../mt5_bridge';
 
 interface MT5Config {
   enabled: boolean;
@@ -73,45 +74,51 @@ export const MT5BridgeModal: React.FC<MT5BridgeModalProps> = ({ isOpen, onClose 
     openPositionsCount: 0
   });
 
-  const [eaCode, setEaCode] = useState<string>('');
+  const initialOrigin = typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3000';
+  const [eaCode, setEaCode] = useState<string>(() => generateMql5EACode(initialOrigin));
 
-  const fetchData = async () => {
+  const fetchData = async (isInitial = false, signal?: AbortSignal) => {
+    if (isInitial) setLoading(true);
     try {
-      setLoading(true);
-      const res = await fetch('/api/mt5/config');
+      const res = await fetch('/api/mt5/config', { signal });
       if (res.ok) {
         const data = await res.json();
         if (data.config) {
+          const resolvedUrl = data.config.serverUrl || window.location.origin;
           setConfig(prev => ({
             ...prev,
             ...data.config,
-            serverUrl: data.config.serverUrl || window.location.origin
+            serverUrl: resolvedUrl
           }));
+          setEaCode(generateMql5EACode(resolvedUrl));
         }
         if (data.status) {
           setStatus(data.status);
         }
       }
-
-      // Fetch EA code
-      const codeRes = await fetch('/api/mt5/ea-code');
-      if (codeRes.ok) {
-        const text = await codeRes.text();
-        setEaCode(text);
+    } catch (e: any) {
+      if (e?.name !== 'AbortError') {
+        // Silently tolerate transient network delays without spamming console errors
       }
-    } catch (e) {
-      console.error("Failed to load MT5 bridge data:", e);
     } finally {
-      setLoading(false);
+      if (isInitial) setLoading(false);
     }
   };
 
   useEffect(() => {
-    if (isOpen) {
-      fetchData();
-      const interval = setInterval(fetchData, 4000);
-      return () => clearInterval(interval);
-    }
+    if (!isOpen) return;
+
+    const controller = new AbortController();
+    fetchData(true, controller.signal);
+
+    const interval = setInterval(() => {
+      fetchData(false, controller.signal);
+    }, 5000);
+
+    return () => {
+      controller.abort();
+      clearInterval(interval);
+    };
   }, [isOpen]);
 
   const handleSaveConfig = async () => {
