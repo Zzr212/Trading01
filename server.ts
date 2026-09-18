@@ -1,5 +1,6 @@
 import express from "express";
 import path from "path";
+import fs from "fs";
 import { DatabaseSync } from "node:sqlite";
 import { createServer as createViteServer } from "vite";
 import { TradingBot } from './bot';
@@ -258,6 +259,24 @@ async function startServer() {
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
+  });
+
+  // Endpoints to sync files to Oracle VPS easily
+  app.get("/api/download/bundle.tar.gz", (req, res) => {
+    const bundlePath = path.join(process.cwd(), 'dist_bundle.tar.gz');
+    if (fs.existsSync(bundlePath)) {
+      res.download(bundlePath, 'bundle.tar.gz');
+    } else {
+      res.status(404).send("Bundle not ready");
+    }
+  });
+
+  app.get("/api/download/server.ts", (req, res) => {
+    res.sendFile(path.join(process.cwd(), 'server.ts'));
+  });
+
+  app.get("/api/download/bot.ts", (req, res) => {
+    res.sendFile(path.join(process.cwd(), 'bot.ts'));
   });
 
   // ==========================================
