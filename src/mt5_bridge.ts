@@ -76,7 +76,7 @@ string         gServerUrl = "";
 
 string CleanServerUrl(string u)
 {
-   while(StringLen(u) > 0 && (StringSubstr(u, StringLen(u) - 1, 1) == "/" || StringSubstr(u, StringLen(u) - 1, 1) == "\\"))
+   while(StringLen(u) > 0 && StringSubstr(u, StringLen(u) - 1, 1) == "/")
    {
       u = StringSubstr(u, 0, StringLen(u) - 1);
    }
@@ -84,6 +84,10 @@ string CleanServerUrl(string u)
    if(apiPos > 0)
    {
       u = StringSubstr(u, 0, apiPos);
+   }
+   while(StringLen(u) > 0 && StringSubstr(u, StringLen(u) - 1, 1) == "/")
+   {
+      u = StringSubstr(u, 0, StringLen(u) - 1);
    }
    return u;
 }
