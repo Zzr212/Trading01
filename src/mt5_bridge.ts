@@ -56,10 +56,10 @@ export function generateMql5EACode(serverBaseUrl: string): string {
 //+------------------------------------------------------------------+
 #property copyright "AI Trading Bot"
 #property link      "${cleanUrl}"
-#property version   "2.20"
+#property version   "2.30"
 #property strict
 
-#include <Trade\\Trade.mqh>
+#include <Trade\Trade.mqh>
 
 //--- Input Parameters
 input group "=== Server Bridge Connection ==="
@@ -106,7 +106,7 @@ int OnInit()
    ExtTrade.SetTypeFilling(ORDER_FILLING_IOC);
    
    gServerUrl = CleanServerUrl(InpServerUrl);
-   Print(">>> [AI Trader MT5 Bridge v2.2] Pokrenut. Server URL: ", gServerUrl);
+   Print(">>> [AI Trader MT5 Bridge v2.3] Pokrenut. Server URL: ", gServerUrl);
    Print(">>> Proverite da li je u MT5: Tools -> Options -> Expert Advisors -> 'Allow WebRequest' dodat tačan URL: ", gServerUrl);
    
    EventSetTimer(InpTimerSeconds);
@@ -556,34 +556,110 @@ void ExecuteOrSyncTrade(string tradeJson)
       return;
    }
    
+   // Izračunaj minimalnu dozvoljenu distancu za Stops Level brokera
+   long stopsLevel = SymbolInfoInteger(symbol, SYMBOL_TRADE_STOPS_LEVEL);
+   long spread = SymbolInfoInteger(symbol, SYMBOL_SPREAD);
+   double minDistance = MathMax((double)stopsLevel, (double)spread) * point;
+   if(minDistance <= 0.0) minDistance = 20 * point;
+   
    if(typeStr == "LONG" || typeStr == "BUY")
    {
-      // Osiguraj da SL nije iznad trenutne cene
-      if(normSL >= tick.ask) normSL = NormalizeDouble(tick.ask * 0.995, digits);
+      // Zaštita od "invalid stops (10016)": SL mora biti bezbedno ispod Bid cene za bar minDistance
+      if(normSL > 0 && normSL >= (tick.bid - minDistance))
+      {
+         normSL = NormalizeDouble(tick.bid - minDistance - (10 * point), digits);
+      }
+      // TP mora biti bezbedno iznad Ask cene
+      if(normTP > 0 && normTP <= (tick.ask + minDistance))
+      {
+         normTP = NormalizeDouble(tick.ask + minDistance + (10 * point), digits);
+      }
       
-      if(ExtTrade.Buy(lot, symbol, tick.ask, normSL, normTP, orderComment))
+      bool success = ExtTrade.Buy(lot, symbol, tick.ask, normSL, normTP, orderComment);
+      
+      // Fallback: Ako broker odbije direktan SL/TP (ECN / Market Execution ili volatilnost), otvori nalog i odmah dodaj SL/TP
+      if(!success)
+      {
+         uint retCode = ExtTrade.ResultRetcode();
+         PrintFormat(">>> [MT5 Buy Retry] Direktan nalog sa SL/TP vratio grešku %d (%s). Pokrećem Market izvršenje...", retCode, ExtTrade.ResultRetcodeDescription());
+         
+         if(ExtTrade.Buy(lot, symbol, 0, 0, 0, orderComment))
+         {
+            ulong newTicket = ExtTrade.ResultOrder();
+            PrintFormat(">>> [MT5 EXECUTION SUCCESS] Kupljeno %s Lot: %.2f @ %.4f (Ticket: %d)", symbol, lot, ExtTrade.ResultPrice(), newTicket);
+            
+            // Naknadno postavi Stop Loss i Take Profit
+            if(normSL > 0 || normTP > 0)
+            {
+               Sleep(100);
+               MqlTick curTick;
+               if(SymbolInfoTick(symbol, curTick))
+               {
+                  if(normSL >= (curTick.bid - minDistance)) normSL = NormalizeDouble(curTick.bid - minDistance - (10 * point), digits);
+                  if(normTP > 0 && normTP <= (curTick.ask + minDistance)) normTP = NormalizeDouble(curTick.ask + minDistance + (10 * point), digits);
+               }
+               ExtTrade.PositionModify(newTicket, normSL, normTP);
+            }
+         }
+         else
+         {
+            PrintFormat(">>> [MT5 Buy Failed] Simbol: %s, Greška: %s (Kod: %d)", symbol, ExtTrade.ResultRetcodeDescription(), ExtTrade.ResultRetcode());
+         }
+      }
+      else
       {
          PrintFormat(">>> [MT5 EXECUTION] Kupljeno %s Lot: %.2f @ %.4f (SL: %.4f, TP: %.4f, Ticket: %d)", 
             symbol, lot, ExtTrade.ResultPrice(), normSL, normTP, ExtTrade.ResultOrder());
       }
-      else
-      {
-         PrintFormat(">>> [MT5 Buy Failed] Simbol: %s, Greška: %s (Kod: %d)", symbol, ExtTrade.ResultRetcodeDescription(), ExtTrade.ResultRetcode());
-      }
    }
    else if(typeStr == "SHORT" || typeStr == "SELL")
    {
-      // Osiguraj da SL nije ispod trenutne cene
-      if(normSL <= tick.bid) normSL = NormalizeDouble(tick.bid * 1.005, digits);
-      
-      if(ExtTrade.Sell(lot, symbol, tick.bid, normSL, normTP, orderComment))
+      // Zaštita od "invalid stops (10016)": SL mora biti bezbedno iznad Ask cene za bar minDistance
+      if(normSL > 0 && normSL <= (tick.ask + minDistance))
       {
-         PrintFormat(">>> [MT5 EXECUTION] Prodato %s Lot: %.2f @ %.4f (SL: %.4f, TP: %.4f, Ticket: %d)", 
-            symbol, lot, ExtTrade.ResultPrice(), normSL, normTP, ExtTrade.ResultOrder());
+         normSL = NormalizeDouble(tick.ask + minDistance + (10 * point), digits);
+      }
+      // TP mora biti bezbedno ispod Bid cene
+      if(normTP > 0 && normTP >= (tick.bid - minDistance))
+      {
+         normTP = NormalizeDouble(tick.bid - minDistance - (10 * point), digits);
+      }
+      
+      bool success = ExtTrade.Sell(lot, symbol, tick.bid, normSL, normTP, orderComment);
+      
+      // Fallback: Ako broker odbije direktan SL/TP (ECN / Market Execution ili volatilnost), otvori nalog i odmah dodaj SL/TP
+      if(!success)
+      {
+         uint retCode = ExtTrade.ResultRetcode();
+         PrintFormat(">>> [MT5 Sell Retry] Direktan nalog sa SL/TP vratio grešku %d (%s). Pokrećem Market izvršenje...", retCode, ExtTrade.ResultRetcodeDescription());
+         
+         if(ExtTrade.Sell(lot, symbol, 0, 0, 0, orderComment))
+         {
+            ulong newTicket = ExtTrade.ResultOrder();
+            PrintFormat(">>> [MT5 EXECUTION SUCCESS] Prodato %s Lot: %.2f @ %.4f (Ticket: %d)", symbol, lot, ExtTrade.ResultPrice(), newTicket);
+            
+            // Naknadno postavi Stop Loss i Take Profit
+            if(normSL > 0 || normTP > 0)
+            {
+               Sleep(100);
+               MqlTick curTick;
+               if(SymbolInfoTick(symbol, curTick))
+               {
+                  if(normSL <= (curTick.ask + minDistance)) normSL = NormalizeDouble(curTick.ask + minDistance + (10 * point), digits);
+                  if(normTP > 0 && normTP >= (curTick.bid - minDistance)) normTP = NormalizeDouble(curTick.bid - minDistance - (10 * point), digits);
+               }
+               ExtTrade.PositionModify(newTicket, normSL, normTP);
+            }
+         }
+         else
+         {
+            PrintFormat(">>> [MT5 Sell Failed] Simbol: %s, Greška: %s (Kod: %d)", symbol, ExtTrade.ResultRetcodeDescription(), ExtTrade.ResultRetcode());
+         }
       }
       else
       {
-         PrintFormat(">>> [MT5 Sell Failed] Simbol: %s, Greška: %s (Kod: %d)", symbol, ExtTrade.ResultRetcodeDescription(), ExtTrade.ResultRetcode());
+         PrintFormat(">>> [MT5 EXECUTION] Prodato %s Lot: %.2f @ %.4f (SL: %.4f, TP: %.4f, Ticket: %d)", 
+            symbol, lot, ExtTrade.ResultPrice(), normSL, normTP, ExtTrade.ResultOrder());
       }
    }
 }
