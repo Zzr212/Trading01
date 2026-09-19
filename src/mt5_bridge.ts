@@ -486,42 +486,73 @@ void ExecuteOrSyncTrade(string tradeJson)
    if(existingTicket > 0)
    {
       double normCurSL = NormalizeDouble(currentPosSL, digits);
+      double normCurTP = NormalizeDouble(currentPosTP, digits);
       
-      // Proveri da li se SL promenio za bar 2 poena
-      if(MathAbs(normSL - normCurSL) > 2 * point)
+      // Proveri da li se SL ili TP promenio
+      if(MathAbs(normSL - normCurSL) > 2 * point || (normTP > 0 && MathAbs(normTP - normCurTP) > 2 * point))
       {
          MqlTick lastTick;
          if(SymbolInfoTick(symbol, lastTick) && lastTick.bid > 0 && lastTick.ask > 0)
          {
+            long stopsLevel = SymbolInfoInteger(symbol, SYMBOL_TRADE_STOPS_LEVEL);
+            long spread = SymbolInfoInteger(symbol, SYMBOL_SPREAD);
+            double minDistance = MathMax((double)stopsLevel, (double)spread) * point;
+            if(minDistance <= 0.0) minDistance = 20 * point;
+            
             long posType = PositionGetInteger(POSITION_TYPE);
             bool isValidStop = false;
             
+            double targetSL = normSL;
+            double targetTP = normTP;
+            
             if(posType == POSITION_TYPE_BUY)
             {
-               // SL za BUY mora biti ispod trenutne Bid cene
-               if(normSL < lastTick.bid && (normTP == 0 || normSL < normTP))
+               // Za BUY: SL mora biti bezbedno ispod Bid cene za bar minDistance
+               if(targetSL > 0)
                {
-                  isValidStop = true;
+                  if(targetSL < (lastTick.bid - minDistance))
+                  {
+                     isValidStop = true;
+                  }
+                  else
+                  {
+                     // Ako je preblizu, ne šalji nevažeći SL da broker ne baci grešku 10016
+                     isValidStop = false;
+                  }
+               }
+               // TP mora biti iznad Ask cene
+               if(targetTP > 0 && targetTP <= (lastTick.ask + minDistance))
+               {
+                  targetTP = 0; // Ako je TP preblizu, zadrži postojeći
                }
             }
             else if(posType == POSITION_TYPE_SELL)
             {
-               // SL za SELL mora biti iznad trenutne Ask cene
-               if(normSL > lastTick.ask && (normTP == 0 || normSL > normTP))
+               // Za SELL: SL mora biti bezbedno iznad Ask cene za bar minDistance
+               if(targetSL > 0)
                {
-                  isValidStop = true;
+                  if(targetSL > (lastTick.ask + minDistance))
+                  {
+                     isValidStop = true;
+                  }
+                  else
+                  {
+                     isValidStop = false;
+                  }
+               }
+               // TP mora biti ispod Bid cene
+               if(targetTP > 0 && targetTP >= (lastTick.bid - minDistance))
+               {
+                  targetTP = 0;
                }
             }
             
-            if(isValidStop)
+            if(isValidStop && (MathAbs(targetSL - normCurSL) > 2 * point))
             {
-               if(ExtTrade.PositionModify(existingTicket, normSL, normTP))
+               double sendTP = (targetTP > 0 ? targetTP : normCurTP);
+               if(ExtTrade.PositionModify(existingTicket, targetSL, sendTP))
                {
-                  PrintFormat(">>> [MT5 Sync Success] Pozicija #%d (%s) SL uspešno ažuriran na: %.4f", existingTicket, symbol, normSL);
-               }
-               else
-               {
-                  PrintFormat(">>> [MT5 Sync Error] Greška pri promeni SL za #%d: %s (Error code: %d)", existingTicket, ExtTrade.ResultRetcodeDescription(), ExtTrade.ResultRetcode());
+                  PrintFormat(">>> [MT5 Sync Success] Pozicija #%d (%s) SL uspešno ažuriran na: %.4f", existingTicket, symbol, targetSL);
                }
             }
          }
