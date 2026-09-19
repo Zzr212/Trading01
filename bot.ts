@@ -361,9 +361,10 @@ export class TradingBot {
       // Trailing Stop if profit reaches 75% of TP: Strictly bounded below current price and below Take-Profit
       if (tpDistance > 0 && profitDistance >= tpDistance * 0.75) {
         const rawTrailed = currentPrice - (initialRisk * 0.5);
+        const decimals = (symbol.includes('EUR') || symbol.includes('GBP')) ? 5 : (symbol.includes('BTC') || symbol.includes('ETH') || symbol.includes('XAU') || symbol.includes('GOLD')) ? 2 : 4;
         // MT5 Guard: SL must be strictly below currentPrice and strictly below takeProfit
         const maxAllowedLongSL = Math.min(currentPrice * 0.998, activeTrade.takeProfit * 0.998);
-        const validTrailedSL = parseFloat(Math.min(rawTrailed, maxAllowedLongSL).toFixed(4));
+        const validTrailedSL = parseFloat(Math.min(rawTrailed, maxAllowedLongSL).toFixed(decimals));
         
         if (validTrailedSL > activeTrade.stopLoss && validTrailedSL < currentPrice) {
           activeTrade.stopLoss = validTrailedSL;
@@ -388,9 +389,10 @@ export class TradingBot {
       // Trailing Stop if profit reaches 75% of TP: Strictly bounded above current price and above Take-Profit
       if (tpDistance > 0 && profitDistance >= tpDistance * 0.75) {
         const rawTrailed = currentPrice + (initialRisk * 0.5);
+        const decimals = (symbol.includes('EUR') || symbol.includes('GBP')) ? 5 : (symbol.includes('BTC') || symbol.includes('ETH') || symbol.includes('XAU') || symbol.includes('GOLD')) ? 2 : 4;
         // MT5 Guard: SL must be strictly above currentPrice and strictly above takeProfit
         const minAllowedShortSL = Math.max(currentPrice * 1.002, activeTrade.takeProfit * 1.002);
-        const validTrailedSL = parseFloat(Math.max(rawTrailed, minAllowedShortSL).toFixed(4));
+        const validTrailedSL = parseFloat(Math.max(rawTrailed, minAllowedShortSL).toFixed(decimals));
 
         if (validTrailedSL < activeTrade.stopLoss && validTrailedSL > currentPrice) {
           activeTrade.stopLoss = validTrailedSL;
@@ -526,8 +528,8 @@ export class TradingBot {
       isShortSetup = false;
     }
 
-    // Apply BTC Master Guard: Never buy an altcoin if BTC is Bearish, never short if BTC is Bullish
-    if (symbol !== 'BTCUSDT') {
+    // Apply BTC Master Guard: Only for crypto pairs (ETH, SOL), never buy an altcoin if BTC is Bearish, never short if BTC is Bullish
+    if (isCrypto && symbol !== 'BTCUSDT') {
       if (isLongSetup && !btcBullish) {
         console.log(`[BTC Guard] ${symbol} LONG setup blocked because BTC is Bearish.`);
         isLongSetup = false;
