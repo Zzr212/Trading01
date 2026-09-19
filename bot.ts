@@ -55,16 +55,22 @@ export function findSupportResistance(klines: Kline[]): SRLevels {
   return { supports, resistances };
 }
 
-// 6 Top-Tier Liquid Crypto Pairs (Vantage MT5 format: BTCUSD, ETHUSD, SOLUSD, BNBUSD, XRPUSD, DOGEUSD)
-export const PAIRS = ['BTCUSD', 'ETHUSD', 'SOLUSD', 'BNBUSD', 'XRPUSD', 'DOGEUSD'];
+// 6 Institutional & High-Liquidity Pairs (Vantage MT5: BTCUSD, ETHUSD, XAUUSD, EURUSD, GBPUSD, SOLUSD)
+export const PAIRS = ['BTCUSD', 'ETHUSD', 'XAUUSD', 'EURUSD', 'GBPUSD', 'SOLUSD'];
 
 export const toBinanceSymbol = (p: string): string => {
+  if (p === 'XAUUSD' || p === 'GOLD' || p === 'XAUUSDT') return 'PAXGUSDT';
+  if (p === 'EURUSD' || p === 'EURUSDT') return 'EURUSDT';
+  if (p === 'GBPUSD' || p === 'GBPUSDT') return 'GBPUSDT';
   if (p.endsWith('USDT')) return p;
   if (p.endsWith('USD')) return `${p}T`;
   return `${p}USDT`;
 };
 
 export const fromBinanceSymbol = (s: string): string => {
+  if (s === 'PAXGUSDT' || s === 'PAXGUSD') return 'XAUUSD';
+  if (s === 'EURUSDT') return 'EURUSD';
+  if (s === 'GBPUSDT') return 'GBPUSD';
   if (s.endsWith('USDT')) return s.slice(0, -1);
   return s;
 };
@@ -434,10 +440,11 @@ export class TradingBot {
       anchor1hBearish = lastClose1h <= lastEma50_1h || lastEma20_1h <= lastEma50_1h;
     }
 
-    // 4. BTC MASTER TREND GUARD (Crypto Benchmark)
-    // If evaluating an altcoin (ETH, SOL, BNB, XRP, DOGE), align with Bitcoin macro trend
+    // 4. BTC MASTER TREND GUARD (Only for Crypto pairs: ETH, SOL)
+    // Non-crypto pairs (XAUUSD, EURUSD, GBPUSD) trade independently on their own 1H Macro Trends
+    const isCrypto = symbol.includes('BTC') || symbol.includes('ETH') || symbol.includes('SOL');
     let btcBullish = true;
-    if (symbol !== 'BTCUSDT') {
+    if (isCrypto && symbol !== 'BTCUSDT') {
       const btc15m = this.data15m['BTCUSDT'];
       if (btc15m && btc15m.length >= 30) {
         const btcEma21 = calculateEMA(btc15m, 21);
@@ -578,6 +585,26 @@ export class TradingBot {
       const vpvr = calculateVPVR(data15m, 50);
       const topNodes = vpvr.slice(0, 3).map(n => n.price);
       
+      // Spread compensation & Precision calculation based on asset class
+      let spreadBuffer = 0;
+      let decimals = 4;
+      if (symbol.includes('EUR') || symbol.includes('GBP')) {
+        spreadBuffer = 0.00015; // 1.5 pips spread buffer for Major Forex
+        decimals = 5;
+      } else if (symbol.includes('XAU') || symbol.includes('GOLD')) {
+        spreadBuffer = 0.50; // $0.50 spread buffer for Gold
+        decimals = 2;
+      } else if (symbol.includes('BTC')) {
+        spreadBuffer = actualEntry * 0.0004; // 0.04% for BTC
+        decimals = 2;
+      } else if (symbol.includes('ETH')) {
+        spreadBuffer = actualEntry * 0.0005; // 0.05% for ETH
+        decimals = 2;
+      } else {
+        spreadBuffer = actualEntry * 0.0006;
+        decimals = 4;
+      }
+
       let stopLoss = 0;
       let takeProfit = 0;
       
@@ -600,8 +627,9 @@ export class TradingBot {
         }
         
         let tpDistance = closestResistance - actualEntry;
-        const minProfitable = actualEntry * 0.0035;
-        tpDistance = Math.max(slDistance * 1.6, Math.max(minProfitable, Math.min(slDistance * 3.5, tpDistance)));
+        // Minimum R:R of 1.85:1 + spread compensation to guarantee solid net profitability
+        const minTargetDistance = (slDistance * 1.85) + spreadBuffer;
+        tpDistance = Math.max(minTargetDistance, Math.min(slDistance * 3.6, tpDistance));
         takeProfit = actualEntry + tpDistance;
 
       } else {
@@ -622,8 +650,9 @@ export class TradingBot {
         }
 
         let tpDistance = actualEntry - closestSupport;
-        const minProfitable = actualEntry * 0.0035;
-        tpDistance = Math.max(slDistance * 1.6, Math.max(minProfitable, Math.min(slDistance * 3.5, tpDistance)));
+        // Minimum R:R of 1.85:1 + spread compensation to guarantee solid net profitability
+        const minTargetDistance = (slDistance * 1.85) + spreadBuffer;
+        tpDistance = Math.max(minTargetDistance, Math.min(slDistance * 3.6, tpDistance));
         takeProfit = actualEntry - tpDistance;
       }
 
@@ -636,10 +665,10 @@ export class TradingBot {
         id: Math.random().toString(36).substr(2, 9),
         pair: symbol,
         type: signalType,
-        entryPrice: parseFloat(actualEntry.toFixed(4)),
-        takeProfit: parseFloat(takeProfit.toFixed(4)),
-        stopLoss: parseFloat(stopLoss.toFixed(4)),
-        tp1Price: parseFloat(tp1Price.toFixed(4)),
+        entryPrice: parseFloat(actualEntry.toFixed(decimals)),
+        takeProfit: parseFloat(takeProfit.toFixed(decimals)),
+        stopLoss: parseFloat(stopLoss.toFixed(decimals)),
+        tp1Price: parseFloat(tp1Price.toFixed(decimals)),
         tp1Hit: false,
         status: 'ACTIVE',
         timestamp: Date.now(),

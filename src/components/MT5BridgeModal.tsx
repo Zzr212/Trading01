@@ -48,18 +48,18 @@ export const MT5BridgeModal: React.FC<MT5BridgeModalProps> = ({ isOpen, onClose 
     lotSizes: {
       "BTCUSD": 0.01,
       "ETHUSD": 0.05,
-      "SOLUSD": 0.20,
-      "BNBUSD": 0.10,
-      "XRPUSD": 10.0,
-      "DOGEUSD": 100.0
+      "XAUUSD": 0.02,
+      "EURUSD": 0.10,
+      "GBPUSD": 0.10,
+      "SOLUSD": 0.50
     },
     symbolMappings: {
       "BTCUSD": "BTCUSD",
       "ETHUSD": "ETHUSD",
-      "SOLUSD": "SOLUSD",
-      "BNBUSD": "BNBUSD",
-      "XRPUSD": "XRPUSD",
-      "DOGEUSD": "DOGEUSD"
+      "XAUUSD": "XAUUSD",
+      "EURUSD": "EURUSD",
+      "GBPUSD": "GBPUSD",
+      "SOLUSD": "SOLUSD"
     }
   });
 
@@ -539,7 +539,7 @@ export const MT5BridgeModal: React.FC<MT5BridgeModalProps> = ({ isOpen, onClose 
                             />
                           </td>
                           <td className="py-3 px-4 text-neutral-500 font-mono text-[11px]">
-                            {pair === 'BTCUSD' ? '0.01 (1 mikrolot)' : pair === 'ETHUSD' ? '0.05' : pair === 'DOGEUSD' ? '10 - 100' : '0.10'}
+                            {pair === 'BTCUSD' ? '0.01 (1 mikrolot)' : pair === 'ETHUSD' ? '0.05' : pair === 'XAUUSD' ? '0.02 (Zlato)' : pair === 'SOLUSD' ? '0.50' : '0.10 (Forex mini)'}
                           </td>
                         </tr>
                       );

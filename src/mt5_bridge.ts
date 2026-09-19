@@ -28,18 +28,18 @@ export const DEFAULT_MT5_CONFIG: MT5Config = {
   lotSizes: {
     "BTCUSD": 0.01,
     "ETHUSD": 0.05,
-    "SOLUSD": 0.20,
-    "BNBUSD": 0.10,
-    "XRPUSD": 10.0,
-    "DOGEUSD": 100.0
+    "XAUUSD": 0.02,
+    "EURUSD": 0.10,
+    "GBPUSD": 0.10,
+    "SOLUSD": 0.50
   },
   symbolMappings: {
     "BTCUSD": "BTCUSD",
     "ETHUSD": "ETHUSD",
-    "SOLUSD": "SOLUSD",
-    "BNBUSD": "BNBUSD",
-    "XRPUSD": "XRPUSD",
-    "DOGEUSD": "DOGEUSD"
+    "XAUUSD": "XAUUSD",
+    "EURUSD": "EURUSD",
+    "GBPUSD": "GBPUSD",
+    "SOLUSD": "SOLUSD"
   }
 };
 
@@ -56,7 +56,7 @@ export function generateMql5EACode(serverBaseUrl: string): string {
 //+------------------------------------------------------------------+
 #property copyright "AI Trading Bot"
 #property link      "${cleanUrl}"
-#property version   "2.30"
+#property version   "2.50"
 #property strict
 
 #include <Trade/Trade.mqh>
@@ -71,6 +71,12 @@ input ulong  InpDeviation       = 50;                    // Maksimalno odstupanj
 input group "=== Risk & Execution Controls ==="
 input bool   InpAutoLotsFromServer = true;               // Koristi veličinu lota definisanu u Web App
 input double InpFallbackLot        = 0.01;               // Podrazumevani Lot ako nije podešen u App
+
+input group "=== Spread Filter & Slippage Guard ==="
+input bool   InpEnableSpreadFilter = true;               // Aktiviraj Zaštitu od visokog spreada
+input double InpMaxSpreadForex     = 3.0;                // Max Spread Forex (u pipovima, npr. EURUSD max 3.0)
+input double InpMaxSpreadGold      = 60.0;               // Max Spread Zlato (u poenima / cents)
+input double InpMaxSpreadCrypto    = 500.0;              // Max Spread Kripto (u poenima)
 
 //--- Global Variables
 CTrade         ExtTrade;
@@ -393,6 +399,13 @@ string ResolveBrokerSymbol(string standardSymbol)
    if(SymbolSelect(standardSymbol, true)) return standardSymbol;
    
    string clean = standardSymbol;
+   if(clean == "XAUUSD" || clean == "PAXGUSDT" || clean == "PAXGUSD")
+   {
+      if(SymbolSelect("XAUUSD", true)) return "XAUUSD";
+      if(SymbolSelect("GOLD", true)) return "GOLD";
+   }
+   if(clean == "GOLD" && SymbolSelect("XAUUSD", true)) return "XAUUSD";
+
    if(StringFind(clean, "USDT") >= 0)
    {
       StringReplace(clean, "USDT", "USD");
@@ -592,6 +605,23 @@ void ExecuteOrSyncTrade(string tradeJson)
    long spread = SymbolInfoInteger(symbol, SYMBOL_SPREAD);
    double minDistance = MathMax((double)stopsLevel, (double)spread) * point;
    if(minDistance <= 0.0) minDistance = 20 * point;
+   
+   // Spread Filter Check: Zaštita od vanredno velikog spreada
+   if(InpEnableSpreadFilter)
+   {
+      double maxAllowedSpreadPips = InpMaxSpreadForex;
+      if(StringFind(symbol, "BTC") >= 0) maxAllowedSpreadPips = InpMaxSpreadCrypto;
+      else if(StringFind(symbol, "ETH") >= 0 || StringFind(symbol, "SOL") >= 0) maxAllowedSpreadPips = InpMaxSpreadCrypto;
+      else if(StringFind(symbol, "XAU") >= 0 || StringFind(symbol, "GOLD") >= 0) maxAllowedSpreadPips = InpMaxSpreadGold;
+
+      double currentSpreadPoints = (tick.ask - tick.bid) / point;
+      if(currentSpreadPoints > (maxAllowedSpreadPips * 10))
+      {
+         PrintFormat(">>> [SPREAD FILTER] Simbol %s trenutni spread (%.1f pts) prelazi limit (%.1f pts). Preskačem ulaz.", 
+            symbol, currentSpreadPoints, maxAllowedSpreadPips * 10);
+         return;
+      }
+   }
    
    if(typeStr == "LONG" || typeStr == "BUY")
    {

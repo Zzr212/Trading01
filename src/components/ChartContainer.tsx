@@ -73,7 +73,14 @@ export default function ChartContainer({ symbol, onBack, activeTrade, onPriceUpd
         setData(initialData);
         setIsLoading(false);
 
-        const binanceSym = symbol.endsWith('USDT') ? symbol.toLowerCase() : (symbol.endsWith('USD') ? `${symbol.toLowerCase()}t` : `${symbol.toLowerCase()}usdt`);
+        let binanceSym = symbol.endsWith('USDT') ? symbol.toLowerCase() : (symbol.endsWith('USD') ? `${symbol.toLowerCase()}t` : `${symbol.toLowerCase()}usdt`);
+        if (symbol === 'XAUUSD' || symbol === 'GOLD' || symbol === 'XAUUSDT') {
+          binanceSym = 'paxgusdt';
+        } else if (symbol === 'EURUSD' || symbol === 'EURUSDT') {
+          binanceSym = 'eurusdt';
+        } else if (symbol === 'GBPUSD' || symbol === 'GBPUSDT') {
+          binanceSym = 'gbpusdt';
+        }
         const wsUrl = `wss://stream.binance.com:9443/ws/${binanceSym}@kline_${timeframe}`;
         const ws = new WebSocket(wsUrl);
         wsRef.current = ws;
