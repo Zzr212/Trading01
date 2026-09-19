@@ -59,7 +59,7 @@ export function generateMql5EACode(serverBaseUrl: string): string {
 #property version   "2.30"
 #property strict
 
-#include <Trade\Trade.mqh>
+#include <Trade/Trade.mqh>
 
 //--- Input Parameters
 input group "=== Server Bridge Connection ==="
