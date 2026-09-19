@@ -56,7 +56,7 @@ export function generateMql5EACode(serverBaseUrl: string): string {
 //+------------------------------------------------------------------+
 #property copyright "AI Trading Bot"
 #property link      "${cleanUrl}"
-#property version   "2.10"
+#property version   "2.20"
 #property strict
 
 #include <Trade\\Trade.mqh>
@@ -106,7 +106,7 @@ int OnInit()
    ExtTrade.SetTypeFilling(ORDER_FILLING_IOC);
    
    gServerUrl = CleanServerUrl(InpServerUrl);
-   Print(">>> [AI Trader MT5 Bridge v2.1] Pokrenut. Server URL: ", gServerUrl);
+   Print(">>> [AI Trader MT5 Bridge v2.2] Pokrenut. Server URL: ", gServerUrl);
    Print(">>> Proverite da li je u MT5: Tools -> Options -> Expert Advisors -> 'Allow WebRequest' dodat tačan URL: ", gServerUrl);
    
    EventSetTimer(InpTimerSeconds);
@@ -146,7 +146,7 @@ bool HttpGet(string url, string &responseOut)
    char postData[];
    char resultData[];
    string resultHeaders;
-   string headers = "Accept: application/json\\r\\nUser-Agent: MT5-AITrader/2.1\\r\\n";
+   string headers = "Accept: application/json\\r\\nUser-Agent: MT5-AITrader/2.2\\r\\n";
    
    ResetLastError();
    int res = WebRequest("GET", url, headers, 4000, postData, resultData, resultHeaders);
@@ -188,7 +188,7 @@ bool HttpPost(string url, string jsonBody, string &responseOut)
    char postData[];
    char resultData[];
    string resultHeaders;
-   string headers = "Content-Type: application/json\\r\\nAccept: application/json\\r\\nUser-Agent: MT5-AITrader/2.1\\r\\n";
+   string headers = "Content-Type: application/json\\r\\nAccept: application/json\\r\\nUser-Agent: MT5-AITrader/2.2\\r\\n";
    
    // Kopiraj u UTF-8 i odseci završni \\0 null-terminator kako Express ne bi vratio 400 Bad Request
    int copied = StringToCharArray(jsonBody, postData, 0, WHOLE_ARRAY, CP_UTF8);
@@ -399,12 +399,26 @@ string ResolveBrokerSymbol(string standardSymbol)
       if(SymbolSelect(clean, true)) return clean;
    }
    
-   string suffixes[] = {"+", ".v", ".a", "m", "_pro", ".raw", ".ecn"};
+   string suffixes[] = {"+", ".v", ".a", "m", "_pro", ".raw", ".ecn", ".s", ".c", "-c", "pro"};
    for(int i = 0; i < ArraySize(suffixes); i++)
    {
       string testSym = clean + suffixes[i];
       if(SymbolSelect(testSym, true)) return testSym;
+      string testSym2 = standardSymbol + suffixes[i];
+      if(SymbolSelect(testSym2, true)) return testSym2;
    }
+   
+   // Pretraga po svim simbolima brokera ako prefiks/sufiks nije standardan
+   int totalSymbols = SymbolsTotal(false);
+   for(int s = 0; s < totalSymbols; s++)
+   {
+      string curSym = SymbolName(s, false);
+      if(StringFind(curSym, clean) >= 0 || StringFind(curSym, standardSymbol) >= 0)
+      {
+         if(SymbolSelect(curSym, true)) return curSym;
+      }
+   }
+   
    return standardSymbol;
 }
 
@@ -424,13 +438,18 @@ void ExecuteOrSyncTrade(string tradeJson)
    double tp        = ExtractJsonDouble(tradeJson, "takeProfit");
    double lot       = ExtractJsonDouble(tradeJson, "lotSize");
    if(lot <= 0 || !InpAutoLotsFromServer) lot = InpFallbackLot;
+   if(lot <= 0) lot = 0.01;
    
    if(id == "" || symbol == "") return;
    
    // Normalizacija simbola u MT5 (provera da li simbol postoji u Market Watch)
    if(!SymbolInfoInteger(symbol, SYMBOL_SELECT))
    {
-      SymbolSelect(symbol, true);
+      if(!SymbolSelect(symbol, true))
+      {
+         PrintFormat(">>> [MT5 Simbol Upozorenje] Simbol '%s' (ili '%s') nije pronađen u ponudi brokera. Preskačem.", symbol, rawSym);
+         return;
+      }
    }
    
    // Proveri da li je pozicija već otvorena na MT5
@@ -455,21 +474,24 @@ void ExecuteOrSyncTrade(string tradeJson)
       }
    }
    
+   int digits = (int)SymbolInfoInteger(symbol, SYMBOL_DIGITS);
+   if(digits <= 0) digits = 2;
+   double point = SymbolInfoDouble(symbol, SYMBOL_POINT);
+   if(point <= 0.0) point = 0.00001;
+
+   double normSL = NormalizeDouble(sl, digits);
+   double normTP = NormalizeDouble(tp, digits);
+
    // 1. Ako pozicija već postoji: Sinhronizuj Stop Loss (Break-Even / Trailing)
    if(existingTicket > 0)
    {
-      int digits = (int)SymbolInfoInteger(symbol, SYMBOL_DIGITS);
-      double normSL = NormalizeDouble(sl, digits);
-      double normTP = NormalizeDouble(tp, digits);
       double normCurSL = NormalizeDouble(currentPosSL, digits);
       
       // Proveri da li se SL promenio za bar 2 poena
-      double point = SymbolInfoDouble(symbol, SYMBOL_POINT);
       if(MathAbs(normSL - normCurSL) > 2 * point)
       {
-         // MT5 Broker Stops Validation: Provera trenutne cene
          MqlTick lastTick;
-         if(SymbolInfoTick(symbol, lastTick))
+         if(SymbolInfoTick(symbol, lastTick) && lastTick.bid > 0 && lastTick.ask > 0)
          {
             long posType = PositionGetInteger(POSITION_TYPE);
             bool isValidStop = false;
@@ -508,55 +530,60 @@ void ExecuteOrSyncTrade(string tradeJson)
    }
    
    // 2. Ako pozicija ne postoji: Otvori novi trejd u MT5!
-   int digits = (int)SymbolInfoInteger(symbol, SYMBOL_DIGITS);
-   double normSL = NormalizeDouble(sl, digits);
-   double normTP = NormalizeDouble(tp, digits);
    string orderComment = "AI_" + id;
    
-   // Proveri lot granice
-   double minLot = SymbolInfoDouble(symbol, SYMBOL_VOLUME_MIN);
-   double maxLot = SymbolInfoDouble(symbol, SYMBOL_VOLUME_MAX);
+   // Bezbedno proveri lot granice (Zero divide zaštita!)
+   double minLot  = SymbolInfoDouble(symbol, SYMBOL_VOLUME_MIN);
+   double maxLot  = SymbolInfoDouble(symbol, SYMBOL_VOLUME_MAX);
    double lotStep = SymbolInfoDouble(symbol, SYMBOL_VOLUME_STEP);
-   if(lot < minLot) lot = minLot;
-   if(lot > maxLot) lot = maxLot;
-   lot = MathFloor(lot / lotStep) * lotStep;
+   
+   if(minLot > 0.000001 && lot < minLot) lot = minLot;
+   if(maxLot > 0.000001 && lot > maxLot) lot = maxLot;
+   
+   if(lotStep > 0.000001)
+   {
+      lot = MathFloor(lot / lotStep) * lotStep;
+   }
+   if(lot <= 0.000001)
+   {
+      lot = (minLot > 0.000001 ? minLot : 0.01);
+   }
+   
+   MqlTick tick;
+   if(!SymbolInfoTick(symbol, tick) || tick.ask <= 0 || tick.bid <= 0)
+   {
+      PrintFormat(">>> [MT5 Warning] Nema dostupnih tick cena za %s (Ask: %.4f, Bid: %.4f). Preskačem nalog.", symbol, tick.ask, tick.bid);
+      return;
+   }
    
    if(typeStr == "LONG" || typeStr == "BUY")
    {
-      MqlTick tick;
-      if(SymbolInfoTick(symbol, tick))
+      // Osiguraj da SL nije iznad trenutne cene
+      if(normSL >= tick.ask) normSL = NormalizeDouble(tick.ask * 0.995, digits);
+      
+      if(ExtTrade.Buy(lot, symbol, tick.ask, normSL, normTP, orderComment))
       {
-         // Osiguraj da SL nije iznad trenutne cene
-         if(normSL >= tick.ask) normSL = NormalizeDouble(tick.ask * 0.995, digits);
-         
-         if(ExtTrade.Buy(lot, symbol, tick.ask, normSL, normTP, orderComment))
-         {
-            PrintFormat(">>> [MT5 EXECUTION] Kupljeno %s Lot: %.2f @ %.4f (SL: %.4f, TP: %.4f, Ticket: %d)", 
-               symbol, lot, ExtTrade.ResultPrice(), normSL, normTP, ExtTrade.ResultOrder());
-         }
-         else
-         {
-            PrintFormat(">>> [MT5 Buy Failed] Simbol: %s, Greška: %s (Kod: %d)", symbol, ExtTrade.ResultRetcodeDescription(), ExtTrade.ResultRetcode());
-         }
+         PrintFormat(">>> [MT5 EXECUTION] Kupljeno %s Lot: %.2f @ %.4f (SL: %.4f, TP: %.4f, Ticket: %d)", 
+            symbol, lot, ExtTrade.ResultPrice(), normSL, normTP, ExtTrade.ResultOrder());
+      }
+      else
+      {
+         PrintFormat(">>> [MT5 Buy Failed] Simbol: %s, Greška: %s (Kod: %d)", symbol, ExtTrade.ResultRetcodeDescription(), ExtTrade.ResultRetcode());
       }
    }
    else if(typeStr == "SHORT" || typeStr == "SELL")
    {
-      MqlTick tick;
-      if(SymbolInfoTick(symbol, tick))
+      // Osiguraj da SL nije ispod trenutne cene
+      if(normSL <= tick.bid) normSL = NormalizeDouble(tick.bid * 1.005, digits);
+      
+      if(ExtTrade.Sell(lot, symbol, tick.bid, normSL, normTP, orderComment))
       {
-         // Osiguraj da SL nije ispod trenutne cene
-         if(normSL <= tick.bid) normSL = NormalizeDouble(tick.bid * 1.005, digits);
-         
-         if(ExtTrade.Sell(lot, symbol, tick.bid, normSL, normTP, orderComment))
-         {
-            PrintFormat(">>> [MT5 EXECUTION] Prodato %s Lot: %.2f @ %.4f (SL: %.4f, TP: %.4f, Ticket: %d)", 
-               symbol, lot, ExtTrade.ResultPrice(), normSL, normTP, ExtTrade.ResultOrder());
-         }
-         else
-         {
-            PrintFormat(">>> [MT5 Sell Failed] Simbol: %s, Greška: %s (Kod: %d)", symbol, ExtTrade.ResultRetcodeDescription(), ExtTrade.ResultRetcode());
-         }
+         PrintFormat(">>> [MT5 EXECUTION] Prodato %s Lot: %.2f @ %.4f (SL: %.4f, TP: %.4f, Ticket: %d)", 
+            symbol, lot, ExtTrade.ResultPrice(), normSL, normTP, ExtTrade.ResultOrder());
+      }
+      else
+      {
+         PrintFormat(">>> [MT5 Sell Failed] Simbol: %s, Greška: %s (Kod: %d)", symbol, ExtTrade.ResultRetcodeDescription(), ExtTrade.ResultRetcode());
       }
    }
 }
