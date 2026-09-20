@@ -5,6 +5,7 @@ import {
 } from 'lucide-react';
 import { PAIRS } from '../types';
 import { generateMql5EACode } from '../mt5_bridge';
+import { getMarketStatus } from '../lib/market_hours';
 
 interface MT5Config {
   enabled: boolean;
@@ -42,7 +43,7 @@ export const MT5BridgeModal: React.FC<MT5BridgeModalProps> = ({ isOpen, onClose 
 
   const [config, setConfig] = useState<MT5Config>({
     enabled: true,
-    serverUrl: window.location.origin,
+    serverUrl: typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3000',
     magicNumber: 889900,
     slippagePoints: 50,
     lotSizes: {
@@ -95,10 +96,6 @@ export const MT5BridgeModal: React.FC<MT5BridgeModalProps> = ({ isOpen, onClose 
             window.location.hostname.includes('oracle')
           );
           
-          // Determine the most reliable URL:
-          // 1. If user has Oracle VPS or 92.5.176.43, use clean port 80 (http://92.5.176.43)
-          // 2. If user already saved a custom serverUrl, keep it (cleaning any legacy :3000 on Oracle IP)
-          // 3. If running inside Cloud Run preview (*.run.app), prefer live tunnel or Oracle IP
           let resolvedUrl = data.config.serverUrl || window.location.origin;
           if (resolvedUrl && resolvedUrl.includes('92.5.176.43')) {
             resolvedUrl = 'http://92.5.176.43';
@@ -128,7 +125,7 @@ export const MT5BridgeModal: React.FC<MT5BridgeModalProps> = ({ isOpen, onClose 
       }
     } catch (e: any) {
       if (e?.name !== 'AbortError') {
-        // Silently tolerate transient network delays without spamming console errors
+        // Silently tolerate transient network delays
       }
     } finally {
       if (isInitial) setLoading(false);
@@ -178,87 +175,93 @@ export const MT5BridgeModal: React.FC<MT5BridgeModalProps> = ({ isOpen, onClose 
   };
 
   const handleDownloadFile = () => {
+    if (!eaCode) return;
     const blob = new Blob([eaCode], { type: 'text/plain;charset=utf-8' });
     const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'AITrader_MT5_Bridge.mq5';
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = 'AITrader_MT5_Bridge.mq5';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
     URL.revokeObjectURL(url);
   };
 
   if (!isOpen) return null;
 
-  const isRecentlyConnected = status.connected && (Date.now() - status.lastHeartbeat < 30000);
+  const isRecentlyConnected = status.connected && (Date.now() - status.lastHeartbeat < 25000);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 bg-black/80 backdrop-blur-md animate-in fade-in duration-200">
-      <div className="relative w-full max-w-4xl bg-neutral-950 border border-neutral-800 rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 md:p-6 bg-black/85 backdrop-blur-md">
+      <div className="bg-neutral-950 border border-neutral-800 rounded-2xl w-full max-w-4xl overflow-hidden shadow-2xl flex flex-col max-h-[94vh] sm:max-h-[90vh]">
         
         {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-neutral-800/80 bg-neutral-900/50">
-          <div className="flex items-center gap-3">
-            <div className="p-2 rounded-xl bg-gradient-to-br from-blue-500/20 to-indigo-500/20 border border-blue-500/30 text-blue-400">
-              <Server size={20} />
+        <div className="flex items-center justify-between px-4 sm:px-6 py-3.5 sm:py-4 border-b border-neutral-800 bg-neutral-900/60">
+          <div className="flex items-center gap-2.5 sm:gap-3 min-w-0">
+            <div className="p-2 rounded-xl bg-blue-500/10 border border-blue-500/20 text-blue-400 shrink-0">
+              <Server size={18} className="sm:w-5 sm:h-5" />
             </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <h2 className="text-base sm:text-lg font-bold text-white tracking-wide">MetaTrader 5 (MT5) Bridge</h2>
-                <span className="text-[10px] uppercase font-mono px-2 py-0.5 rounded-full bg-blue-500/10 text-blue-400 border border-blue-500/20">
-                  Realtime Algo
+            <div className="min-w-0">
+              <div className="flex items-center gap-2 flex-wrap">
+                <h2 className="text-sm sm:text-base font-bold text-white tracking-tight truncate">
+                  MetaTrader 5 Bridge Hub
+                </h2>
+                <span className="text-[9px] sm:text-[10px] uppercase font-mono px-2 py-0.5 rounded-full bg-blue-500/10 text-blue-400 border border-blue-500/20">
+                  Execution Layer
                 </span>
               </div>
-              <p className="text-xs text-neutral-400">Povezivanje web trading bota sa Vašim Vantage MT5 terminalom na laptopu</p>
+              <p className="text-[11px] text-neutral-400 truncate hidden sm:block">
+                Povezivanje web algoritma sa Vašim Vantage MT5 terminalom
+              </p>
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
             <button
-              onClick={fetchData}
-              className="p-2 rounded-lg bg-neutral-900 hover:bg-neutral-800 text-neutral-400 hover:text-white border border-neutral-800 transition-colors cursor-pointer"
+              onClick={() => fetchData(true)}
+              className="p-2 rounded-xl bg-neutral-900 hover:bg-neutral-800 text-neutral-400 hover:text-white border border-neutral-800 transition-colors cursor-pointer"
               title="Osveži podatke"
             >
-              <RefreshCw size={15} className={loading ? "animate-spin" : ""} />
+              <RefreshCw size={15} className={loading ? "animate-spin text-blue-400" : ""} />
             </button>
             <button
               onClick={onClose}
-              className="p-2 rounded-lg bg-neutral-900 hover:bg-neutral-800 text-neutral-400 hover:text-white border border-neutral-800 transition-colors cursor-pointer"
+              className="p-2 rounded-xl bg-neutral-900 hover:bg-neutral-800 text-neutral-400 hover:text-white border border-neutral-800 transition-colors cursor-pointer"
             >
-              <X size={18} />
+              <X size={16} />
             </button>
           </div>
         </div>
 
-        {/* Live Status Pill & Tabs */}
-        <div className="flex flex-wrap items-center justify-between gap-3 px-6 py-3 bg-neutral-900/30 border-b border-neutral-900">
-          <div className="flex items-center gap-1.5 p-1 bg-neutral-900 rounded-xl border border-neutral-800">
+        {/* Live Status Pill & Horizontal Scrollable Tabs */}
+        <div className="px-4 sm:px-6 py-2.5 bg-neutral-900/40 border-b border-neutral-850 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+          {/* Scrollable tab row on mobile */}
+          <div className="flex items-center gap-1.5 overflow-x-auto pb-1 sm:pb-0 no-scrollbar">
             <button
               onClick={() => setActiveTab('status')}
-              className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all cursor-pointer ${
+              className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all whitespace-nowrap cursor-pointer ${
                 activeTab === 'status' 
-                  ? 'bg-neutral-800 text-white shadow' 
+                  ? 'bg-neutral-800 text-white shadow border border-neutral-700' 
                   : 'text-neutral-400 hover:text-neutral-200'
               }`}
             >
-              Check View (Status)
+              Status & Telemetrija
             </button>
             <button
               onClick={() => setActiveTab('lots')}
-              className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all cursor-pointer ${
+              className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all whitespace-nowrap cursor-pointer ${
                 activeTab === 'lots' 
-                  ? 'bg-neutral-800 text-white shadow' 
+                  ? 'bg-neutral-800 text-white shadow border border-neutral-700' 
                   : 'text-neutral-400 hover:text-neutral-200'
               }`}
             >
-              Lot Size & Simboli
+              Lot Veličine & Simboli
             </button>
             <button
               onClick={() => setActiveTab('code')}
-              className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all cursor-pointer ${
+              className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all whitespace-nowrap cursor-pointer ${
                 activeTab === 'code' 
-                  ? 'bg-neutral-800 text-white shadow' 
+                  ? 'bg-neutral-800 text-white shadow border border-neutral-700' 
                   : 'text-neutral-400 hover:text-neutral-200'
               }`}
             >
@@ -266,114 +269,109 @@ export const MT5BridgeModal: React.FC<MT5BridgeModalProps> = ({ isOpen, onClose 
             </button>
             <button
               onClick={() => setActiveTab('instructions')}
-              className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all cursor-pointer ${
+              className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all whitespace-nowrap cursor-pointer ${
                 activeTab === 'instructions' 
-                  ? 'bg-neutral-800 text-white shadow' 
+                  ? 'bg-neutral-800 text-white shadow border border-neutral-700' 
                   : 'text-neutral-400 hover:text-neutral-200'
               }`}
             >
-              Uputstvo
+              Uputstvo za Setup
             </button>
           </div>
 
-          <div className="flex items-center gap-2">
-            <div className={`flex items-center gap-2 px-3 py-1 rounded-full text-xs font-mono border ${
+          <div className="flex items-center self-start sm:self-auto">
+            <div className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-mono font-medium border ${
               isRecentlyConnected 
                 ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30' 
                 : 'bg-amber-500/10 text-amber-400 border-amber-500/30'
             }`}>
-              <span className={`h-2 w-2 rounded-full ${isRecentlyConnected ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'}`}></span>
-              <span>{isRecentlyConnected ? 'MT5 CONNECTED (ONLINE)' : 'ČEKAM MT5 EXPERT ADVISOR'}</span>
+              <span className={`h-2 w-2 rounded-full shrink-0 ${isRecentlyConnected ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'}`}></span>
+              <span>{isRecentlyConnected ? 'MT5 ONLINE' : 'ČEKAM EA KONEKCIJU'}</span>
             </div>
           </div>
         </div>
 
         {/* Content Body */}
-        <div className="p-6 overflow-y-auto space-y-6 flex-1 text-sm text-neutral-300">
+        <div className="p-4 sm:p-6 overflow-y-auto space-y-4 sm:space-y-6 flex-1 text-xs text-neutral-300">
           
-          {/* TAB 1: STATUS / CHECK VIEW */}
+          {/* TAB 1: STATUS */}
           {activeTab === 'status' && (
-            <div className="space-y-6 animate-in fade-in duration-150">
+            <div className="space-y-4 sm:space-y-6 animate-in fade-in duration-150">
               {/* Connection Banner */}
-              <div className={`p-4 rounded-xl border flex items-start gap-3 ${
+              <div className={`p-3.5 sm:p-4 rounded-xl border flex items-start gap-3 ${
                 isRecentlyConnected 
                   ? 'bg-emerald-950/20 border-emerald-800/40 text-emerald-200' 
                   : 'bg-neutral-900/80 border-neutral-800 text-neutral-300'
               }`}>
-                <div className={`p-2 rounded-lg mt-0.5 ${isRecentlyConnected ? 'bg-emerald-500/20 text-emerald-400' : 'bg-neutral-800 text-neutral-400'}`}>
-                  {isRecentlyConnected ? <ShieldCheck size={20} /> : <AlertCircle size={20} />}
+                <div className={`p-2 rounded-lg mt-0.5 shrink-0 ${isRecentlyConnected ? 'bg-emerald-500/20 text-emerald-400' : 'bg-neutral-800 text-neutral-400'}`}>
+                  {isRecentlyConnected ? <ShieldCheck size={18} /> : <AlertCircle size={18} />}
                 </div>
                 <div>
-                  <h3 className="font-semibold text-white">
+                  <h3 className="font-semibold text-white text-xs sm:text-sm">
                     {isRecentlyConnected 
-                      ? 'MetaTrader 5 je uspešno povezan i sinhronizovan!' 
+                      ? 'MetaTrader 5 je uspešno sinhronizovan!' 
                       : 'Nema aktivne konekcije sa MetaTrader 5 terminalom'}
                   </h3>
-                  <p className="text-xs text-neutral-400 mt-1 leading-relaxed">
+                  <p className="text-[11px] text-neutral-400 mt-1 leading-relaxed">
                     {isRecentlyConnected
-                      ? `Vaš MT5 Expert Advisor na laptopu redovno šalje puls (svakih ${Math.max(1, Math.round((Date.now() - status.lastHeartbeat) / 1000))}s). Svi novi trejdovi i ažuriranja Stop Loss-a se prenose u realnom vremenu.`
-                      : 'Za aktivaciju, preuzmite i kompajlirajte priloženi MQL5 kod u MetaEditoru na Vašem laptopu, unesite URL servera u MT5 WebRequest i pokrenite EA na bilo kom grafikonu.'}
+                      ? `EA na laptopu šalje puls svakih ${Math.max(1, Math.round((Date.now() - status.lastHeartbeat) / 1000))}s. Svi nalozi i pomeranja Stop Loss-a se prenose trenutno.`
+                      : 'Ubacite MQL5 kod u MetaEditor na laptopu, unesite URL servera u WebRequest i pokrenite EA na grafikonu.'}
                   </p>
                 </div>
               </div>
 
-              {/* Terminal Telemetry Cards */}
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                <div className="bg-neutral-900/60 border border-neutral-800/80 p-3.5 rounded-xl">
-                  <div className="text-[11px] text-neutral-500 uppercase tracking-wider font-mono">Broker</div>
-                  <div className="text-base font-bold text-white mt-1 truncate">{status.broker || (isRecentlyConnected ? 'Vantage' : 'N/A')}</div>
-                  <div className="text-[10px] text-neutral-500 mt-0.5">Acc: {status.accountNumber || 'N/A'}</div>
+              {/* Terminal Telemetry Grid - 2 columns on mobile, 4 on desktop */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 sm:gap-3">
+                <div className="bg-neutral-900/60 border border-neutral-800 p-3 rounded-xl">
+                  <div className="text-[10px] text-neutral-500 uppercase tracking-wider font-mono">Broker</div>
+                  <div className="text-sm sm:text-base font-bold text-white mt-1 truncate">{status.broker || (isRecentlyConnected ? 'Vantage' : 'N/A')}</div>
+                  <div className="text-[10px] text-neutral-500 mt-0.5 truncate">Acc: {status.accountNumber || 'N/A'}</div>
                 </div>
 
-                <div className="bg-neutral-900/60 border border-neutral-800/80 p-3.5 rounded-xl">
-                  <div className="text-[11px] text-neutral-500 uppercase tracking-wider font-mono">MT5 Balance</div>
-                  <div className="text-base font-bold text-emerald-400 mt-1 font-mono">
+                <div className="bg-neutral-900/60 border border-neutral-800 p-3 rounded-xl">
+                  <div className="text-[10px] text-neutral-500 uppercase tracking-wider font-mono">MT5 Balans</div>
+                  <div className="text-sm sm:text-base font-bold text-emerald-400 mt-1 font-mono truncate">
                     ${status.balance ? status.balance.toLocaleString('en-US', { minimumFractionDigits: 2 }) : '0.00'}
                   </div>
-                  <div className="text-[10px] text-neutral-500 mt-0.5">Equity: ${status.equity ? status.equity.toFixed(2) : '0.00'}</div>
+                  <div className="text-[10px] text-neutral-500 mt-0.5 truncate">Eq: ${status.equity ? status.equity.toFixed(2) : '0.00'}</div>
                 </div>
 
-                <div className="bg-neutral-900/60 border border-neutral-800/80 p-3.5 rounded-xl">
-                  <div className="text-[11px] text-neutral-500 uppercase tracking-wider font-mono">Slobodna Margina</div>
-                  <div className="text-base font-bold text-white mt-1 font-mono">
+                <div className="bg-neutral-900/60 border border-neutral-800 p-3 rounded-xl">
+                  <div className="text-[10px] text-neutral-500 uppercase tracking-wider font-mono">Slobodna Margina</div>
+                  <div className="text-sm sm:text-base font-bold text-white mt-1 font-mono truncate">
                     ${status.freeMargin ? status.freeMargin.toFixed(2) : '0.00'}
                   </div>
-                  <div className="text-[10px] text-neutral-500 mt-0.5">Iskorišćena: ${status.margin ? status.margin.toFixed(2) : '0.00'}</div>
+                  <div className="text-[10px] text-neutral-500 mt-0.5 truncate">Margina: ${status.margin ? status.margin.toFixed(2) : '0.00'}</div>
                 </div>
 
-                <div className="bg-neutral-900/60 border border-neutral-800/80 p-3.5 rounded-xl">
-                  <div className="text-[11px] text-neutral-500 uppercase tracking-wider font-mono">Otvorene AI Pozicije</div>
-                  <div className="text-base font-bold text-blue-400 mt-1 font-mono">
+                <div className="bg-neutral-900/60 border border-neutral-800 p-3 rounded-xl">
+                  <div className="text-[10px] text-neutral-500 uppercase tracking-wider font-mono">Aktivne Pozicije</div>
+                  <div className="text-sm sm:text-base font-bold text-blue-400 mt-1 font-mono">
                     {status.openPositionsCount}
                   </div>
                   <div className="text-[10px] text-neutral-500 mt-0.5">Magic: {config.magicNumber}</div>
                 </div>
               </div>
 
-              {/* Endpoint Information & Oracle VPS Custom IP */}
-              <div className="bg-neutral-900/60 border border-neutral-800 rounded-xl p-4 space-y-3">
-                <div className="flex items-center justify-between">
-                  <h4 className="text-xs font-semibold text-neutral-200 uppercase tracking-wider font-mono flex items-center gap-2">
+              {/* Endpoint Information & Server URL */}
+              <div className="bg-neutral-900/60 border border-neutral-800 rounded-xl p-3.5 sm:p-4 space-y-3">
+                <div className="flex items-center justify-between flex-wrap gap-2">
+                  <h4 className="text-xs font-semibold text-neutral-200 uppercase tracking-wider font-mono flex items-center gap-1.5">
                     <Cpu size={14} className="text-blue-400" />
                     Povezivanje Servera (Oracle VPS IP / WebRequest)
                   </h4>
                   {config.serverUrl && !config.serverUrl.includes('run.app') && !config.serverUrl.includes('trycloudflare') ? (
-                    <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-mono bg-blue-500/10 text-blue-400 border border-blue-500/30">
-                      Oracle VPS IP Konfigurisan
+                    <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-mono bg-blue-500/10 text-blue-400 border border-blue-500/30">
+                      Oracle VPS IP
                     </span>
                   ) : tunnelUrl ? (
-                    <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-mono bg-emerald-500/10 text-emerald-400 border border-emerald-500/30">
-                      <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                    <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-mono bg-emerald-500/10 text-emerald-400 border border-emerald-500/30">
                       Aktivan Tunel
                     </span>
                   ) : null}
                 </div>
 
-                <p className="text-[11px] text-neutral-400">
-                  Ukoliko je bot pokrenut na Vašem <strong>Oracle Cloud VPS serveru</strong>, ovde unesite Vašu javnu IP adresu sa portom (npr. <span className="font-mono text-neutral-200">http://123.45.67.89:3000</span>):
-                </p>
-
-                <div className="flex items-center gap-2">
+                <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
                   <input
                     type="text"
                     value={config.serverUrl || ''}
@@ -383,35 +381,33 @@ export const MT5BridgeModal: React.FC<MT5BridgeModalProps> = ({ isOpen, onClose 
                       setEaCode(generateMql5EACode(val || window.location.origin));
                     }}
                     placeholder="http://TVOJ_ORACLE_IP:3000"
-                    className="flex-1 bg-neutral-950 border border-neutral-700/80 rounded-lg px-3 py-2 text-xs font-mono text-emerald-400 font-semibold focus:outline-none focus:border-blue-500"
+                    className="flex-1 bg-neutral-950 border border-neutral-750 rounded-xl px-3 py-2 text-xs font-mono text-emerald-400 font-semibold focus:outline-none focus:border-blue-500"
                   />
-                  <button
-                    onClick={async () => {
-                      await handleSaveConfig();
-                    }}
-                    disabled={saving}
-                    className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white rounded-lg text-xs font-medium transition-colors flex items-center gap-1.5 cursor-pointer shadow"
-                  >
-                    {saveSuccess ? <Check size={14} className="text-white" /> : <Save size={14} />}
-                    <span>{saveSuccess ? 'Sačuvano!' : 'Sačuvaj IP'}</span>
-                  </button>
-                  <button
-                    onClick={() => {
-                      navigator.clipboard.writeText(config.serverUrl || window.location.origin);
-                      setCopied(true);
-                      setTimeout(() => setCopied(false), 2000);
-                    }}
-                    className="px-3 py-2 bg-neutral-800 hover:bg-neutral-750 text-white rounded-lg text-xs font-medium transition-colors flex items-center gap-1.5 cursor-pointer"
-                    title="Kopiraj URL za MT5"
-                  >
-                    {copied ? <Check size={14} className="text-emerald-400" /> : <Copy size={14} />}
-                    <span>{copied ? 'Kopirano' : 'Kopiraj'}</span>
-                  </button>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={handleSaveConfig}
+                      disabled={saving}
+                      className="flex-1 sm:flex-none px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white rounded-xl text-xs font-medium transition-colors flex items-center justify-center gap-1.5 cursor-pointer shadow"
+                    >
+                      {saveSuccess ? <Check size={14} className="text-white" /> : <Save size={14} />}
+                      <span>{saveSuccess ? 'Sačuvano!' : 'Sačuvaj'}</span>
+                    </button>
+                    <button
+                      onClick={() => {
+                        navigator.clipboard.writeText(config.serverUrl || window.location.origin);
+                        setCopied(true);
+                        setTimeout(() => setCopied(false), 2000);
+                      }}
+                      className="flex-1 sm:flex-none px-3 py-2 bg-neutral-800 hover:bg-neutral-700 text-white rounded-xl text-xs font-medium transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
+                    >
+                      {copied ? <Check size={14} className="text-emerald-400" /> : <Copy size={14} />}
+                      <span>{copied ? 'Kopirano' : 'Kopiraj'}</span>
+                    </button>
+                  </div>
                 </div>
 
-                {/* Quick 1-click Preset Selector */}
-                <div className="flex flex-wrap items-center gap-2 pt-1">
-                  <span className="text-[10px] text-neutral-500 uppercase tracking-wider font-mono">Brzi izbor:</span>
+                {/* Quick Presets */}
+                <div className="flex flex-wrap items-center gap-1.5 pt-1">
                   <button
                     type="button"
                     onClick={() => {
@@ -419,9 +415,9 @@ export const MT5BridgeModal: React.FC<MT5BridgeModalProps> = ({ isOpen, onClose 
                       setConfig(prev => ({ ...prev, serverUrl: oracleUrl }));
                       setEaCode(generateMql5EACode(oracleUrl));
                     }}
-                    className="px-2.5 py-1 rounded bg-neutral-800 hover:bg-neutral-700 text-emerald-400 border border-neutral-700 text-[11px] font-mono transition-colors flex items-center gap-1 cursor-pointer"
+                    className="px-2.5 py-1 rounded-lg bg-neutral-800 hover:bg-neutral-750 text-emerald-400 border border-neutral-700 text-[11px] font-mono transition-colors flex items-center gap-1 cursor-pointer"
                   >
-                    <span>⚡ Preporuka: Direktni Oracle VPS (http://92.5.176.43 - Port 80)</span>
+                    <span>⚡ Oracle VPS (http://92.5.176.43)</span>
                   </button>
                   {tunnelUrl && (
                     <button
@@ -430,135 +426,112 @@ export const MT5BridgeModal: React.FC<MT5BridgeModalProps> = ({ isOpen, onClose 
                         setConfig(prev => ({ ...prev, serverUrl: tunnelUrl }));
                         setEaCode(generateMql5EACode(tunnelUrl));
                       }}
-                      className="px-2 py-1 rounded bg-neutral-850 hover:bg-neutral-800 text-neutral-400 border border-neutral-800 text-[11px] font-mono transition-colors flex items-center gap-1 cursor-pointer"
+                      className="px-2.5 py-1 rounded-lg bg-neutral-850 hover:bg-neutral-800 text-neutral-400 border border-neutral-800 text-[11px] font-mono transition-colors flex items-center gap-1 cursor-pointer"
                     >
                       <span>☁️ Cloudflare Tunel</span>
                     </button>
                   )}
                 </div>
-
-                {/* Oracle VPS Specific Checklist */}
-                <div className="p-3 bg-neutral-950/70 border border-neutral-800/80 rounded-lg text-[11px] text-neutral-400 space-y-2">
-                  <div className="text-blue-400 font-medium flex items-center gap-1.5">
-                    <AlertCircle size={13} />
-                    <span>Važno za Oracle Cloud VPS i MT5 na laptopu:</span>
-                  </div>
-                  <ul className="list-disc list-inside space-y-1 text-neutral-400 pl-1">
-                    <li>
-                      <strong className="text-neutral-200">Tačan format adrese:</strong> Koristite <span className="text-emerald-400 font-mono">http://92.5.176.43</span> (standardni port 80, bez dodavanja porta :3000 i bez <span className="font-mono text-neutral-300">/api</span>).
-                    </li>
-                    <li>
-                      <strong className="text-neutral-200">Zašto je preporučeno port 80?</strong> Standardni web port 80 prolazi bez ikakvih restrikcija u MT5 WebRequest-u i Windows firewall-u.
-                    </li>
-                    <li>
-                      <strong className="text-neutral-200">U MT5 dozvolite WebRequest:</strong> U MT5 idite u <em>Tools → Options → Expert Advisors</em>, označite <em>Allow WebRequest for listed URL</em> i dodajte: <span className="text-emerald-400 font-mono">{config.serverUrl || 'http://92.5.176.43'}</span>.
-                    </li>
-                    <li>
-                      <strong className="text-neutral-200">Oracle Cloud Firewall / NGINX:</strong> Proverite da je na VPS-u NGINX ili server prosleđen na port <span className="font-mono text-neutral-300">80</span> i otvoren u Security Listama.
-                    </li>
-                  </ul>
-                </div>
               </div>
             </div>
           )}
 
-          {/* TAB 2: LOT SIZES & SYMBOL MAPPING */}
+          {/* TAB 2: LOT SIZES - Mobile First Responsive Card Layout */}
           {activeTab === 'lots' && (
-            <div className="space-y-6 animate-in fade-in duration-150">
-              <div className="flex items-center justify-between">
+            <div className="space-y-4 sm:space-y-6 animate-in fade-in duration-150">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                 <div>
-                  <h3 className="text-sm font-semibold text-white">Konfiguracija lota i naziva simbola u MT5</h3>
-                  <p className="text-xs text-neutral-400">Podesite željeni lot (Volume) koji će EA otvarati na Vašem nalogu za svaki kripto par.</p>
+                  <h3 className="text-xs sm:text-sm font-semibold text-white">Konfiguracija lota i MT5 simbola</h3>
+                  <p className="text-[11px] text-neutral-400">Podesite željeni lot (Volume) koji će EA otvarati na Vašem računu za svaki par.</p>
                 </div>
                 <button
                   onClick={handleSaveConfig}
                   disabled={saving}
-                  className="px-4 py-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white text-xs font-medium rounded-xl transition-colors shadow-lg flex items-center gap-2 cursor-pointer"
+                  className="self-start sm:self-auto px-4 py-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white text-xs font-medium rounded-xl transition-colors shadow flex items-center gap-2 cursor-pointer"
                 >
-                  {saving ? <RefreshCw size={14} className="animate-spin" /> : saveSuccess ? <CheckCircle2 size={14} className="text-emerald-300" /> : <Sliders size={14} />}
+                  {saving ? <RefreshCw size={14} className="animate-spin" /> : saveSuccess ? <CheckCircle2 size={14} className="text-emerald-300" /> : <Save size={14} />}
                   <span>{saveSuccess ? 'Sačuvano!' : 'Sačuvaj Podešavanja'}</span>
                 </button>
               </div>
 
-              {/* Table */}
-              <div className="overflow-x-auto rounded-xl border border-neutral-800">
-                <table className="w-full text-left border-collapse text-xs">
-                  <thead>
-                    <tr className="bg-neutral-900/80 border-b border-neutral-800 text-neutral-400 font-mono">
-                      <th className="py-2.5 px-4">Bot Simbol</th>
-                      <th className="py-2.5 px-4">MT5 Simbol na Vantage-u</th>
-                      <th className="py-2.5 px-4">Trgovani Lot (Volume)</th>
-                      <th className="py-2.5 px-4">Preporučeni Min. Lot</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-neutral-850">
-                    {PAIRS.map(pair => {
-                      const currentLot = config.lotSizes[pair] ?? (config.lotSizes[`${pair}T`] ?? 0.01);
-                      const currentMt5Sym = config.symbolMappings[pair] ?? (config.symbolMappings[`${pair}T`] ?? pair);
-                      
-                      return (
-                        <tr key={pair} className="hover:bg-neutral-900/40 transition-colors">
-                          <td className="py-3 px-4 font-mono font-bold text-white">
-                            {pair}
-                          </td>
-                          <td className="py-3 px-4">
-                            <input
-                              type="text"
-                              value={currentMt5Sym}
-                              onChange={(e) => {
-                                const val = e.target.value.trim();
-                                setConfig(prev => ({
-                                  ...prev,
-                                  symbolMappings: {
-                                    ...prev.symbolMappings,
-                                    [pair]: val
-                                  }
-                                }));
-                              }}
-                              placeholder="npr. BTCUSD"
-                              className="bg-neutral-950 border border-neutral-800 rounded-lg px-2.5 py-1.5 text-xs font-mono text-neutral-200 focus:border-blue-500 focus:outline-none w-36"
-                            />
-                          </td>
-                          <td className="py-3 px-4">
-                            <input
-                              type="number"
-                              step="0.01"
-                              min="0.01"
-                              value={currentLot}
-                              onChange={(e) => {
-                                const val = parseFloat(e.target.value) || 0.01;
-                                setConfig(prev => ({
-                                  ...prev,
-                                  lotSizes: {
-                                    ...prev.lotSizes,
-                                    [pair]: val
-                                  }
-                                }));
-                              }}
-                              className="bg-neutral-950 border border-neutral-800 rounded-lg px-2.5 py-1.5 text-xs font-mono text-emerald-400 font-bold focus:border-blue-500 focus:outline-none w-28"
-                            />
-                          </td>
-                          <td className="py-3 px-4 text-neutral-500 font-mono text-[11px]">
-                            {pair === 'BTCUSD' ? '0.01 (1 mikrolot)' : pair === 'ETHUSD' ? '0.05' : pair === 'XAUUSD' ? '0.02 (Zlato)' : pair === 'SOLUSD' ? '0.50' : '0.10 (Forex mini)'}
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
+              {/* Mobile-Friendly Grid of Cards */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                {PAIRS.map(pair => {
+                  const currentLot = config.lotSizes[pair] ?? (config.lotSizes[`${pair}T`] ?? 0.01);
+                  const currentMt5Sym = config.symbolMappings[pair] ?? (config.symbolMappings[`${pair}T`] ?? pair);
+                  const marketStatus = getMarketStatus(pair);
+                  
+                  return (
+                    <div key={pair} className="p-3.5 rounded-xl bg-neutral-900/60 border border-neutral-800 flex flex-col justify-between space-y-3">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <span className="font-mono font-bold text-white text-sm">{pair}</span>
+                          <span className={`text-[9px] font-mono px-1.5 py-0.5 rounded border ${marketStatus.badgeColor}`}>
+                            {marketStatus.isOpen ? (marketStatus.isCrypto ? 'CRYPTO 24/7' : 'OPEN') : 'WEEKEND'}
+                          </span>
+                        </div>
+                        <span className="text-[10px] text-neutral-500 font-mono">
+                          Min: {pair === 'BTCUSD' ? '0.01' : pair === 'ETHUSD' ? '0.05' : pair === 'XAUUSD' ? '0.02' : pair === 'SOLUSD' ? '0.50' : '0.10'}
+                        </span>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-2">
+                        <div>
+                          <label className="text-[10px] text-neutral-400 block mb-1">MT5 Simbol</label>
+                          <input
+                            type="text"
+                            value={currentMt5Sym}
+                            onChange={(e) => {
+                              const val = e.target.value.trim();
+                              setConfig(prev => ({
+                                ...prev,
+                                symbolMappings: {
+                                  ...prev.symbolMappings,
+                                  [pair]: val
+                                }
+                              }));
+                            }}
+                            className="w-full bg-neutral-950 border border-neutral-750 rounded-lg px-2.5 py-1.5 text-xs font-mono text-neutral-200 focus:border-blue-500 focus:outline-none"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="text-[10px] text-neutral-400 block mb-1">Lot Veličina</label>
+                          <input
+                            type="number"
+                            step="0.01"
+                            min="0.01"
+                            value={currentLot}
+                            onChange={(e) => {
+                              const val = parseFloat(e.target.value) || 0.01;
+                              setConfig(prev => ({
+                                ...prev,
+                                lotSizes: {
+                                  ...prev.lotSizes,
+                                  [pair]: val
+                                }
+                              }));
+                            }}
+                            className="w-full bg-neutral-950 border border-neutral-750 rounded-lg px-2.5 py-1.5 text-xs font-mono text-emerald-400 font-bold focus:border-blue-500 focus:outline-none"
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
 
               {/* Extra Risk Controls */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 p-4 rounded-xl bg-neutral-900/40 border border-neutral-800">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 p-3.5 rounded-xl bg-neutral-900/40 border border-neutral-800">
                 <div>
                   <label className="text-xs font-medium text-neutral-300 block mb-1">MT5 Magic Number</label>
                   <input
                     type="number"
                     value={config.magicNumber}
                     onChange={(e) => setConfig(prev => ({ ...prev, magicNumber: parseInt(e.target.value) || 889900 }))}
-                    className="w-full bg-neutral-950 border border-neutral-800 rounded-lg px-3 py-2 text-xs font-mono text-white focus:outline-none"
+                    className="w-full bg-neutral-950 border border-neutral-750 rounded-lg px-3 py-2 text-xs font-mono text-white focus:outline-none"
                   />
-                  <span className="text-[10px] text-neutral-500 mt-1 block">Jedinstveni identifikator po kome EA razlikuje svoje trejdove od ručnih</span>
+                  <span className="text-[10px] text-neutral-500 mt-0.5 block">Identifikator AI trejdova u terminalu</span>
                 </div>
                 <div>
                   <label className="text-xs font-medium text-neutral-300 block mb-1">Maksimalni Slippage (u poenima)</label>
@@ -566,89 +539,86 @@ export const MT5BridgeModal: React.FC<MT5BridgeModalProps> = ({ isOpen, onClose 
                     type="number"
                     value={config.slippagePoints}
                     onChange={(e) => setConfig(prev => ({ ...prev, slippagePoints: parseInt(e.target.value) || 50 }))}
-                    className="w-full bg-neutral-950 border border-neutral-800 rounded-lg px-3 py-2 text-xs font-mono text-white focus:outline-none"
+                    className="w-full bg-neutral-950 border border-neutral-750 rounded-lg px-3 py-2 text-xs font-mono text-white focus:outline-none"
                   />
-                  <span className="text-[10px] text-neutral-500 mt-1 block">Maksimalno dozvoljeno cenovno odstupanje pri egzekuciji naloga</span>
+                  <span className="text-[10px] text-neutral-500 mt-0.5 block">Maksimalno dozvoljeno cenovno odstupanje</span>
                 </div>
               </div>
             </div>
           )}
 
-          {/* TAB 3: MQL5 EA SOURCE CODE */}
+          {/* TAB 3: MQL5 CODE */}
           {activeTab === 'code' && (
-            <div className="space-y-4 animate-in fade-in duration-150">
-              <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="space-y-3.5 animate-in fade-in duration-150">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
                 <div>
-                  <h3 className="text-sm font-semibold text-white">MQL5 Expert Advisor Izvorni Kod (.mq5)</h3>
-                  <p className="text-xs text-neutral-400">Kompletan kod koji ubacujete u MetaEditor na Vašem laptopu.</p>
+                  <h3 className="text-xs sm:text-sm font-semibold text-white">MQL5 Expert Advisor Kod (.mq5)</h3>
+                  <p className="text-[11px] text-neutral-400">Izvorni kod za MetaEditor na Vašem laptopu.</p>
                 </div>
                 <div className="flex items-center gap-2">
                   <button
                     onClick={handleCopyCode}
-                    className="px-3 py-1.5 bg-neutral-800 hover:bg-neutral-700 text-white rounded-lg text-xs font-medium transition-colors flex items-center gap-1.5 cursor-pointer shadow"
+                    className="flex-1 sm:flex-none px-3 py-1.5 bg-neutral-800 hover:bg-neutral-700 text-white rounded-xl text-xs font-medium transition-colors flex items-center justify-center gap-1.5 cursor-pointer shadow"
                   >
                     {copied ? <Check size={14} className="text-emerald-400" /> : <Copy size={14} />}
-                    <span>{copied ? 'Kopirano u Clipboard!' : 'Kopiraj Celokupan Kod'}</span>
+                    <span>{copied ? 'Kopirano!' : 'Kopiraj Kod'}</span>
                   </button>
                   <button
                     onClick={handleDownloadFile}
-                    className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-xs font-medium transition-colors flex items-center gap-1.5 cursor-pointer shadow"
+                    className="flex-1 sm:flex-none px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-medium transition-colors flex items-center justify-center gap-1.5 cursor-pointer shadow"
                   >
                     <Download size={14} />
-                    <span>Preuzmi .mq5 Fajl</span>
+                    <span>Preuzmi .mq5</span>
                   </button>
                 </div>
               </div>
 
               {/* Code Display Area */}
               <div className="relative rounded-xl border border-neutral-800 bg-neutral-950 overflow-hidden">
-                <div className="flex items-center justify-between px-4 py-2 border-b border-neutral-850 bg-neutral-900/60 text-xs font-mono text-neutral-400">
+                <div className="flex items-center justify-between px-3.5 py-2 border-b border-neutral-850 bg-neutral-900/60 text-[11px] font-mono text-neutral-400">
                   <div className="flex items-center gap-2">
                     <FileCode size={14} className="text-blue-400" />
                     <span>AITrader_MT5_Bridge.mq5</span>
                   </div>
-                  <span>UTF-8 | MQL5</span>
+                  <span>MQL5 UTF-8</span>
                 </div>
-                <pre className="p-4 text-xs font-mono text-neutral-300 overflow-x-auto max-h-[380px] leading-relaxed selection:bg-blue-500 selection:text-white">
-                  {eaCode || '// Učitavanje koda sa servera...'}
+                <pre className="p-3.5 text-[11px] font-mono text-neutral-300 overflow-x-auto max-h-[340px] leading-relaxed selection:bg-blue-500 selection:text-white">
+                  {eaCode || '// Učitavanje koda...'}
                 </pre>
               </div>
             </div>
           )}
 
-          {/* TAB 4: STEP-BY-STEP INSTRUCTIONS */}
+          {/* TAB 4: INSTRUCTIONS */}
           {activeTab === 'instructions' && (
-            <div className="space-y-6 animate-in fade-in duration-150 text-xs leading-relaxed">
-              <h3 className="text-sm font-bold text-white">Kako povezati MT5 na laptopu sa ovim algoritmom u 4 koraka:</h3>
+            <div className="space-y-3.5 sm:space-y-4 animate-in fade-in duration-150 text-xs leading-relaxed">
+              <h3 className="text-xs sm:text-sm font-bold text-white">Setup u 4 jednostavna koraka:</h3>
 
-              <div className="space-y-4">
+              <div className="space-y-3">
                 {/* Step 1 */}
                 <div className="flex items-start gap-3 p-3.5 rounded-xl bg-neutral-900/50 border border-neutral-800">
                   <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-blue-500/20 text-blue-400 font-bold font-mono text-xs">
                     1
                   </div>
-                  <div className="space-y-1.5">
-                    <h4 className="font-semibold text-white">Dozvola WebRequest komunikacije u MetaTraderu 5</h4>
+                  <div className="space-y-1.5 min-w-0 flex-1">
+                    <h4 className="font-semibold text-white">Dozvola WebRequest u MetaTraderu 5</h4>
                     <p className="text-neutral-400">
-                      U Vašem MetaTrader 5 programu na laptopu idite u gornji meni:
+                      U MT5 na laptopu otvorite: <code className="text-neutral-200 bg-neutral-950 px-1 py-0.5 rounded border border-neutral-800 font-mono">Tools → Options (Ctrl+O) → Expert Advisors</code>
                     </p>
-                    <div className="p-2 rounded bg-neutral-950 font-mono text-neutral-300 text-[11px] border border-neutral-850">
-                      Tools → Options (ili prečica Ctrl + O) → Tab "Expert Advisors"
-                    </div>
-                    <ul className="list-disc list-inside text-neutral-400 space-y-1 pl-1">
-                      <li>Označite kućicu <strong className="text-neutral-200">"Allow Algo Trading"</strong></li>
-                      <li>Označite kućicu <strong className="text-neutral-200">"Allow WebRequest for listed URL"</strong></li>
-                      <li>Kliknite na zeleni plus (<strong className="text-emerald-400">+</strong>) i dodajte tačnu adresu ovog servera:</li>
+                    <ul className="list-disc list-inside text-neutral-400 space-y-0.5 pl-1">
+                      <li>Označite <strong className="text-neutral-200">"Allow Algo Trading"</strong></li>
+                      <li>Označite <strong className="text-neutral-200">"Allow WebRequest for listed URL"</strong></li>
+                      <li>Dodajte adresu servera:</li>
                     </ul>
-                    <div className="p-2 rounded bg-neutral-950 font-mono text-emerald-400 text-[11px] border border-neutral-850 flex items-center justify-between">
-                      <span>{config.serverUrl || tunnelUrl || window.location.origin}</span>
+                    <div className="p-2 rounded bg-neutral-950 font-mono text-emerald-400 text-[11px] border border-neutral-800 flex items-center justify-between gap-2 overflow-hidden">
+                      <span className="truncate">{config.serverUrl || tunnelUrl || window.location.origin}</span>
                       <button
                         onClick={() => {
                           navigator.clipboard.writeText(config.serverUrl || tunnelUrl || window.location.origin);
                           setCopied(true);
                           setTimeout(() => setCopied(false), 2000);
                         }}
-                        className="text-neutral-400 hover:text-white transition-colors cursor-pointer"
+                        className="text-neutral-400 hover:text-white shrink-0 cursor-pointer"
                         title="Kopiraj"
                       >
                         {copied ? <Check size={14} className="text-emerald-400" /> : <Copy size={14} />}
@@ -662,15 +632,11 @@ export const MT5BridgeModal: React.FC<MT5BridgeModalProps> = ({ isOpen, onClose 
                   <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-blue-500/20 text-blue-400 font-bold font-mono text-xs">
                     2
                   </div>
-                  <div className="space-y-1.5">
-                    <h4 className="font-semibold text-white">Kreiranje i kompilacija Expert Advisora u MetaEditoru</h4>
-                    <ul className="list-disc list-inside text-neutral-400 space-y-1 pl-1">
-                      <li>U MetaTraderu 5 pritisnite taster <strong className="text-neutral-200">F4</strong> da otvorite MetaEditor.</li>
-                      <li>Kliknite na <strong className="text-neutral-200">New</strong> (Novi fajl) → Izaberite <strong className="text-neutral-200">Expert Advisor (template)</strong> → Next.</li>
-                      <li>Nazovite ga <span className="font-mono text-blue-300">AITrader_MT5_Bridge</span> i kliknite Finish.</li>
-                      <li>Obrišite sve iz tog fajla i zalepite kompletan kod iz taba <strong className="text-neutral-200">"MQL5 Kod (EA)"</strong>.</li>
-                      <li>Pritisnite taster <strong className="text-emerald-400">F7</strong> (ili kliknite dugme <em>Compile</em> na vrhu). Na dnu u "Errors" mora pisati <strong>0 errors, 0 warnings</strong>.</li>
-                    </ul>
+                  <div className="space-y-1 min-w-0 flex-1">
+                    <h4 className="font-semibold text-white">Kompajliranje u MetaEditoru</h4>
+                    <p className="text-neutral-400">
+                      Pritisnite <strong className="text-neutral-200">F4</strong> u MT5, kreirajte novi Expert Advisor pod nazivom <span className="font-mono text-blue-300">AITrader_MT5_Bridge</span>, zalepite kod iz taba <em>MQL5 Kod</em> i pritisnite <strong className="text-emerald-400">F7 (Compile)</strong>.
+                    </p>
                   </div>
                 </div>
 
@@ -679,14 +645,11 @@ export const MT5BridgeModal: React.FC<MT5BridgeModalProps> = ({ isOpen, onClose 
                   <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-blue-500/20 text-blue-400 font-bold font-mono text-xs">
                     3
                   </div>
-                  <div className="space-y-1.5">
-                    <h4 className="font-semibold text-white">Pokretanje EA na grafikonu u MT5</h4>
-                    <ul className="list-disc list-inside text-neutral-400 space-y-1 pl-1">
-                      <li>Vratite se u MT5 prozor. Otvorite grafikon bilo kog para (npr. <span className="font-mono text-neutral-200">BTCUSD</span>).</li>
-                      <li>U levom panelu <strong className="text-neutral-200">Navigator</strong> (Ctrl + N) pod <strong className="text-neutral-200">Expert Advisors</strong> pronađite <em>AITrader_MT5_Bridge</em>.</li>
-                      <li>Prevucite ga mišem na grafikon. U prozoru koji se pojavi pod tabom <em>Common</em> proverite da je čekirano <strong className="text-neutral-200">"Allow Algo Trading"</strong> i kliknite OK.</li>
-                      <li>U gornjoj traci MT5 terminala proverite da li je dugme <strong className="text-emerald-400">"Algo Trading"</strong> upaljeno (zelena ikonica).</li>
-                    </ul>
+                  <div className="space-y-1 min-w-0 flex-1">
+                    <h4 className="font-semibold text-white">Pokretanje na grafikonu</h4>
+                    <p className="text-neutral-400">
+                      U MT5 u levom panelu <em>Navigator</em> pod <em>Expert Advisors</em> prevucite <strong>AITrader_MT5_Bridge</strong> na bilo koji grafikon i uključite dugme <strong>Algo Trading</strong> na vrhu MT5.
+                    </p>
                   </div>
                 </div>
 
@@ -695,10 +658,10 @@ export const MT5BridgeModal: React.FC<MT5BridgeModalProps> = ({ isOpen, onClose 
                   <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-blue-500/20 text-blue-400 font-bold font-mono text-xs">
                     4
                   </div>
-                  <div className="space-y-1.5">
-                    <h4 className="font-semibold text-white">Potvrda rada i provera statusa</h4>
+                  <div className="space-y-1 min-w-0 flex-1">
+                    <h4 className="font-semibold text-white">Automatsko praćenje i Stop Loss</h4>
                     <p className="text-neutral-400">
-                      U roku od 5-10 sekundi, status u ovom modalu (tab <em>Check View</em>) će se promeniti u zeleno: <strong className="text-emerald-400">MT5 CONNECTED (ONLINE)</strong> i videćete Vaš Vantage balans i equity. Od tog trenutka svaki trejd i pomeranje Stop Loss-a se izvršavaju automatski!
+                      Status u tabu <em>Status & Telemetrija</em> će se promeniti u <strong className="text-emerald-400">MT5 ONLINE</strong>. Sve pozicije, TP1 uzimanje 50% profita, pomeranje na Break-Even i Trailing Stop rade 100% samostalno.
                     </p>
                   </div>
                 </div>
@@ -709,14 +672,14 @@ export const MT5BridgeModal: React.FC<MT5BridgeModalProps> = ({ isOpen, onClose 
         </div>
 
         {/* Footer */}
-        <div className="flex items-center justify-between px-6 py-3 border-t border-neutral-800/80 bg-neutral-900/50 text-xs text-neutral-400">
-          <div className="flex items-center gap-2">
-            <span className="h-2 w-2 rounded-full bg-blue-400"></span>
-            <span>Vantage MT5 Realtime Execution Layer</span>
+        <div className="flex items-center justify-between px-4 sm:px-6 py-3 border-t border-neutral-800 bg-neutral-900/40 text-xs text-neutral-400">
+          <div className="flex items-center gap-1.5 font-mono text-[11px]">
+            <span className="h-2 w-2 rounded-full bg-blue-400 shrink-0"></span>
+            <span className="truncate">Vantage MT5 Execution Layer</span>
           </div>
           <button
             onClick={onClose}
-            className="px-4 py-1.5 rounded-lg bg-neutral-800 hover:bg-neutral-700 text-white transition-colors cursor-pointer"
+            className="px-4 py-1.5 rounded-xl bg-neutral-800 hover:bg-neutral-700 text-white transition-colors cursor-pointer text-xs"
           >
             Zatvori
           </button>

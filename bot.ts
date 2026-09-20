@@ -13,6 +13,7 @@ import {
 } from './src/lib/indicators';
 import { fetchHistoricalKlines } from './src/lib/binance';
 import { TradePredictor } from './src/lib/ai';
+import { getMarketStatus } from './src/lib/market_hours';
 
 // VPVR Calculation
 export function calculateVPVR(klines: Kline[], bins: number = 50) {
@@ -407,6 +408,15 @@ export class TradingBot {
   private evaluateNewTrade(symbol: string, currentPrice: number) {
     if (this.activeTrades[symbol]) return;
 
+    // 0. Market Open / Weekend Schedule Guard
+    // Forex (EURUSD, GBPUSD) & Gold (XAUUSD) markets close on weekends.
+    // Crypto (BTCUSD, ETHUSD, SOLUSD) trades 24/7.
+    const marketStatus = getMarketStatus(symbol);
+    if (!marketStatus.isOpen) {
+      // Market is closed (e.g. weekend close or settlement break). Bot completely skips signal evaluation.
+      return;
+    }
+
     // 1. Loss Cooldown Check
     const cooldownUntil = this.pairCooldowns[symbol] || 0;
     if (Date.now() < cooldownUntil) {
@@ -726,6 +736,11 @@ export class TradingBot {
       }
     }
 
+    const marketStatuses: Record<string, any> = {};
+    for (const p of PAIRS) {
+      marketStatuses[p] = getMarketStatus(p);
+    }
+
     return {
       botStatus: 'ONLINE',
       wsStatus: wsConnected ? 'CONNECTED' : 'CONNECTING',
@@ -737,6 +752,7 @@ export class TradingBot {
       activeTradesCount: activeTradesList.length,
       activeTrades: activeTradesList,
       cooldowns: activeCooldowns,
+      marketStatuses,
       fundingRates: this.fundingRates,
       orderBookImbalances: this.obImbalances,
       aiModel: this.predictor.getStatus(),

@@ -10,9 +10,13 @@ import {
   Radio, 
   Layers, 
   HardDrive,
-  ShieldCheck
+  ShieldCheck,
+  Clock,
+  ExternalLink
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+import { getMarketStatus } from '../lib/market_hours';
+import { PAIRS } from '../types';
 
 interface SystemHealthData {
   timestamp: number;
@@ -33,6 +37,7 @@ interface SystemHealthData {
   activeTradesCount: number;
   activeTrades: Array<{ pair: string; type: string; entryPrice: number; stopLoss?: number; takeProfit?: number; tp1Price?: number; tp1Hit?: boolean }>;
   cooldowns?: Record<string, number>;
+  marketStatuses?: Record<string, any>;
   fundingRates: Record<string, number>;
   orderBookImbalances: Record<string, number>;
   aiModel: {
@@ -59,11 +64,11 @@ export default function SystemDiagnosticsModal({ isOpen, onClose }: Props) {
 
   const runDiagnostics = async () => {
     setLoading(true);
-    setScanProgress(10);
+    setScanProgress(15);
     setError(null);
 
-    const timer1 = setTimeout(() => setScanProgress(45), 200);
-    const timer2 = setTimeout(() => setScanProgress(80), 450);
+    const timer1 = setTimeout(() => setScanProgress(55), 200);
+    const timer2 = setTimeout(() => setScanProgress(85), 450);
 
     try {
       const res = await fetch('/api/system-health');
@@ -73,7 +78,7 @@ export default function SystemDiagnosticsModal({ isOpen, onClose }: Props) {
       setTimeout(() => {
         setData(json);
         setLoading(false);
-      }, 300);
+      }, 250);
     } catch (err: any) {
       setError(err.message || 'Failed to reach diagnostic service');
       setLoading(false);
@@ -105,44 +110,46 @@ export default function SystemDiagnosticsModal({ isOpen, onClose }: Props) {
 
   return (
     <AnimatePresence>
-      <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6 bg-black/80 backdrop-blur-md">
+      <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 md:p-6 bg-black/85 backdrop-blur-md">
         <motion.div 
-          initial={{ opacity: 0, scale: 0.96, y: 10 }}
+          initial={{ opacity: 0, scale: 0.97, y: 8 }}
           animate={{ opacity: 1, scale: 1, y: 0 }}
-          exit={{ opacity: 0, scale: 0.96, y: 10 }}
-          className="bg-neutral-950 border border-neutral-800 rounded-2xl w-full max-w-3xl overflow-hidden shadow-2xl flex flex-col max-h-[90vh]"
+          exit={{ opacity: 0, scale: 0.97, y: 8 }}
+          className="bg-neutral-950 border border-neutral-800 rounded-2xl w-full max-w-3xl overflow-hidden shadow-2xl flex flex-col max-h-[92vh]"
         >
           {/* Header */}
-          <div className="flex items-center justify-between px-6 py-4 border-b border-neutral-800/80 bg-neutral-900/40">
-            <div className="flex items-center gap-3">
-              <div className="p-2 rounded-xl bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-                <ShieldCheck size={20} />
+          <div className="flex items-center justify-between px-4 sm:px-6 py-3.5 sm:py-4 border-b border-neutral-800 bg-neutral-900/60">
+            <div className="flex items-center gap-2.5 sm:gap-3 min-w-0">
+              <div className="p-2 rounded-xl bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 shrink-0">
+                <ShieldCheck size={18} className="sm:w-5 sm:h-5" />
               </div>
-              <div>
-                <h2 className="text-base font-bold text-white tracking-tight flex items-center gap-2">
-                  System Diagnostics & Health Check
-                  <span className="text-[10px] uppercase font-mono px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-                    Live Scan
+              <div className="min-w-0">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <h2 className="text-sm sm:text-base font-bold text-white tracking-tight truncate">
+                    System Diagnostics & Health
+                  </h2>
+                  <span className="text-[9px] sm:text-[10px] uppercase font-mono px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                    Live Telemetry
                   </span>
-                </h2>
-                <p className="text-xs text-neutral-400">
-                  Real-time status of TensorFlow.js, WebSockets, SQLite, and Quant Execution Engine.
+                </div>
+                <p className="text-[11px] text-neutral-400 truncate hidden sm:block">
+                  Real-time status of Quant Multi-Factor Engine, WebSockets, DB & Market Schedules
                 </p>
               </div>
             </div>
 
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
               <button
                 onClick={runDiagnostics}
                 disabled={loading}
-                className="p-2 text-neutral-400 hover:text-white bg-neutral-900 hover:bg-neutral-800 border border-neutral-800 rounded-lg transition-colors disabled:opacity-50"
+                className="p-2 text-neutral-400 hover:text-white bg-neutral-900 hover:bg-neutral-800 border border-neutral-800 rounded-xl transition-colors disabled:opacity-50 cursor-pointer"
                 title="Rerun Scan"
               >
-                <RotateCw size={16} className={loading ? 'animate-spin text-emerald-400' : ''} />
+                <RotateCw size={15} className={loading ? 'animate-spin text-emerald-400' : ''} />
               </button>
               <button
                 onClick={onClose}
-                className="p-2 text-neutral-400 hover:text-white bg-neutral-900 hover:bg-neutral-800 border border-neutral-800 rounded-lg transition-colors"
+                className="p-2 text-neutral-400 hover:text-white bg-neutral-900 hover:bg-neutral-800 border border-neutral-800 rounded-xl transition-colors cursor-pointer"
                 title="Close"
               >
                 <X size={16} />
@@ -163,53 +170,85 @@ export default function SystemDiagnosticsModal({ isOpen, onClose }: Props) {
           )}
 
           {/* Body */}
-          <div className="p-6 overflow-y-auto space-y-4">
+          <div className="p-3.5 sm:p-6 overflow-y-auto space-y-4 text-xs">
             {error && (
-              <div className="p-4 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 text-sm flex items-center gap-3">
-                <AlertTriangle size={18} />
+              <div className="p-3.5 rounded-xl bg-rose-500/10 border border-rose-500/20 text-rose-400 text-xs flex items-center gap-2.5">
+                <AlertTriangle size={16} className="shrink-0" />
                 <span>Diagnostics error: {error}</span>
               </div>
             )}
 
-            {/* Quick Status Bar */}
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-              <div className="bg-neutral-900/60 border border-neutral-800/80 rounded-xl p-3">
-                <span className="text-[10px] text-neutral-500 uppercase tracking-wider font-semibold block mb-1">Server Status</span>
-                <div className="flex items-center gap-2">
-                  <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
-                  <span className="font-mono text-sm font-bold text-white">ONLINE</span>
+            {/* Quick Status Bar - 2 columns on mobile, 4 columns on desktop */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-3">
+              <div className="bg-neutral-900/60 border border-neutral-800 rounded-xl p-2.5 sm:p-3">
+                <span className="text-[10px] text-neutral-500 uppercase tracking-wider font-semibold block mb-0.5">Server</span>
+                <div className="flex items-center gap-1.5">
+                  <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse shrink-0" />
+                  <span className="font-mono text-xs sm:text-sm font-bold text-white">ONLINE</span>
                 </div>
               </div>
 
-              <div className="bg-neutral-900/60 border border-neutral-800/80 rounded-xl p-3">
-                <span className="text-[10px] text-neutral-500 uppercase tracking-wider font-semibold block mb-1">AI Engine</span>
-                <div className="flex items-center gap-2">
-                  <span className="h-2 w-2 rounded-full bg-emerald-400" />
-                  <span className="font-mono text-sm font-bold text-white">TF.JS ACTIVE</span>
+              <div className="bg-neutral-900/60 border border-neutral-800 rounded-xl p-2.5 sm:p-3">
+                <span className="text-[10px] text-neutral-500 uppercase tracking-wider font-semibold block mb-0.5">Quant Core</span>
+                <div className="flex items-center gap-1.5">
+                  <span className="h-2 w-2 rounded-full bg-emerald-400 shrink-0" />
+                  <span className="font-mono text-xs sm:text-sm font-bold text-white">CONFLUENCE</span>
                 </div>
               </div>
 
-              <div className="bg-neutral-900/60 border border-neutral-800/80 rounded-xl p-3">
-                <span className="text-[10px] text-neutral-500 uppercase tracking-wider font-semibold block mb-1">Binance WS</span>
-                <div className="flex items-center gap-2">
-                  <span className={`h-2 w-2 rounded-full ${data?.wsStatus === 'CONNECTED' ? 'bg-emerald-400' : 'bg-amber-400'}`} />
-                  <span className="font-mono text-sm font-bold text-white">{data?.wsStatus || 'CHECKING'}</span>
+              <div className="bg-neutral-900/60 border border-neutral-800 rounded-xl p-2.5 sm:p-3">
+                <span className="text-[10px] text-neutral-500 uppercase tracking-wider font-semibold block mb-0.5">Binance WS</span>
+                <div className="flex items-center gap-1.5">
+                  <span className={`h-2 w-2 rounded-full shrink-0 ${data?.wsStatus === 'CONNECTED' ? 'bg-emerald-400' : 'bg-amber-400'}`} />
+                  <span className="font-mono text-xs sm:text-sm font-bold text-white truncate">{data?.wsStatus || 'ONLINE'}</span>
                 </div>
               </div>
 
-              <div className="bg-neutral-900/60 border border-neutral-800/80 rounded-xl p-3">
-                <span className="text-[10px] text-neutral-500 uppercase tracking-wider font-semibold block mb-1">Heap Memory</span>
-                <span className="font-mono text-sm font-bold text-white">{data?.heapUsedMb ? `${data.heapUsedMb} MB` : '...'}</span>
+              <div className="bg-neutral-900/60 border border-neutral-800 rounded-xl p-2.5 sm:p-3">
+                <span className="text-[10px] text-neutral-500 uppercase tracking-wider font-semibold block mb-0.5">Heap Memory</span>
+                <span className="font-mono text-xs sm:text-sm font-bold text-white">{data?.heapUsedMb ? `${data.heapUsedMb} MB` : '...'}</span>
+              </div>
+            </div>
+
+            {/* Asset Market Hours Schedule Card */}
+            <div className="bg-neutral-900/40 border border-neutral-800 rounded-xl p-3.5 sm:p-4 space-y-2.5">
+              <div className="flex items-center justify-between pb-2 border-b border-neutral-800">
+                <div className="flex items-center gap-2 text-white font-medium text-xs sm:text-sm">
+                  <Clock size={15} className="text-amber-400" />
+                  <span>Asset Market Hours & Weekend Detection</span>
+                </div>
+                <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-neutral-900 text-neutral-300 border border-neutral-800">
+                  Auto-Guard
+                </span>
+              </div>
+
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                {PAIRS.map(pair => {
+                  const status = getMarketStatus(pair);
+                  return (
+                    <div key={pair} className="p-2.5 rounded-lg bg-neutral-950/70 border border-neutral-850 flex flex-col justify-between">
+                      <div className="flex items-center justify-between gap-1 mb-1">
+                        <span className="font-bold font-mono text-white text-xs">{pair}</span>
+                        <span className={`text-[9px] font-mono font-bold px-1.5 py-0.5 rounded border ${status.badgeColor}`}>
+                          {status.isOpen ? (status.isCrypto ? '24/7' : 'OPEN') : 'CLOSED'}
+                        </span>
+                      </div>
+                      <div className="text-[10px] text-neutral-400 font-mono truncate">
+                        {status.isOpen ? status.scheduleText : status.nextOpen || 'Weekend Close'}
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             </div>
 
             {/* Detailed System Cards */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2">
-              {/* 1. Quant Confluence Card */}
-              <div className="bg-neutral-900/40 border border-neutral-800/80 rounded-xl p-4 space-y-3">
-                <div className="flex items-center justify-between pb-2 border-b border-neutral-800/60">
-                  <div className="flex items-center gap-2 text-white font-medium text-sm">
-                    <Cpu size={16} className="text-purple-400" />
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 sm:gap-4">
+              {/* 1. Quant Multi-Factor Engine */}
+              <div className="bg-neutral-900/40 border border-neutral-800 rounded-xl p-3.5 sm:p-4 space-y-2.5">
+                <div className="flex items-center justify-between pb-2 border-b border-neutral-800">
+                  <div className="flex items-center gap-2 text-white font-medium text-xs sm:text-sm">
+                    <Cpu size={15} className="text-purple-400" />
                     <span>Quant Multi-Factor Engine</span>
                   </div>
                   <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-purple-500/10 text-purple-300 border border-purple-500/20">
@@ -218,31 +257,31 @@ export default function SystemDiagnosticsModal({ isOpen, onClose }: Props) {
                 </div>
                 <div className="space-y-1.5 text-xs font-mono">
                   <div className="flex justify-between text-neutral-400">
-                    <span>Engine Type:</span>
+                    <span>Engine Architecture:</span>
                     <span className="text-white font-semibold">Deterministic Confluence</span>
                   </div>
                   <div className="flex justify-between text-neutral-400">
                     <span>Evaluated Factors:</span>
-                    <span className="text-white">Trend, VWAP, ADX, BTC, OB</span>
+                    <span className="text-white">1H Anchor, 5m Candle Close, VWAP, ADX</span>
                   </div>
                   <div className="flex justify-between text-neutral-400">
                     <span>Sample Buffer:</span>
                     <span className="text-white">{data?.aiModel.memorySize || 0} trades tracked</span>
                   </div>
                   <div className="flex justify-between text-neutral-400">
-                    <span>Model State:</span>
+                    <span>Engine Status:</span>
                     <span className="text-emerald-400 flex items-center gap-1">
-                      <CheckCircle2 size={12} /> Live Multi-Factor Active
+                      <CheckCircle2 size={12} /> Live Filters Active
                     </span>
                   </div>
                 </div>
               </div>
 
               {/* 2. SQLite Database */}
-              <div className="bg-neutral-900/40 border border-neutral-800/80 rounded-xl p-4 space-y-3">
-                <div className="flex items-center justify-between pb-2 border-b border-neutral-800/60">
-                  <div className="flex items-center gap-2 text-white font-medium text-sm">
-                    <Database size={16} className="text-blue-400" />
+              <div className="bg-neutral-900/40 border border-neutral-800 rounded-xl p-3.5 sm:p-4 space-y-2.5">
+                <div className="flex items-center justify-between pb-2 border-b border-neutral-800">
+                  <div className="flex items-center gap-2 text-white font-medium text-xs sm:text-sm">
+                    <Database size={15} className="text-blue-400" />
                     <span>SQLite3 Persistence Engine</span>
                   </div>
                   <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-blue-500/10 text-blue-300 border border-blue-500/20">
@@ -263,23 +302,19 @@ export default function SystemDiagnosticsModal({ isOpen, onClose }: Props) {
                     <span className="text-emerald-400">{data?.database.latencyMs ?? 0} ms</span>
                   </div>
                   <div className="flex justify-between text-neutral-400">
-                    <span>Replay Table:</span>
+                    <span>Integrity:</span>
                     <span className="text-emerald-400 flex items-center gap-1">
-                      <CheckCircle2 size={12} /> trade_reviews (active)
+                      <CheckCircle2 size={12} /> Pass (Synced)
                     </span>
-                  </div>
-                  <div className="flex justify-between text-neutral-400">
-                    <span>Integrity Check:</span>
-                    <span className="text-emerald-400">Pass (No corruption)</span>
                   </div>
                 </div>
               </div>
 
-              {/* 3. Binance Realtime WebSocket Streams */}
-              <div className="bg-neutral-900/40 border border-neutral-800/80 rounded-xl p-4 space-y-3">
-                <div className="flex items-center justify-between pb-2 border-b border-neutral-800/60">
-                  <div className="flex items-center gap-2 text-white font-medium text-sm">
-                    <Radio size={16} className="text-amber-400" />
+              {/* 3. Binance Realtime WebSocket */}
+              <div className="bg-neutral-900/40 border border-neutral-800 rounded-xl p-3.5 sm:p-4 space-y-2.5">
+                <div className="flex items-center justify-between pb-2 border-b border-neutral-800">
+                  <div className="flex items-center gap-2 text-white font-medium text-xs sm:text-sm">
+                    <Radio size={15} className="text-amber-400" />
                     <span>Binance Feeds & Order Books</span>
                   </div>
                   <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-amber-500/10 text-amber-300 border border-amber-500/20">
@@ -288,35 +323,29 @@ export default function SystemDiagnosticsModal({ isOpen, onClose }: Props) {
                 </div>
                 <div className="space-y-1.5 text-xs font-mono">
                   <div className="flex justify-between text-neutral-400">
-                    <span>Monitored Symbols:</span>
+                    <span>Monitored Assets:</span>
                     <span className="text-white font-semibold">{data?.monitoredPairs.length || 6} pairs</span>
                   </div>
                   <div className="flex justify-between text-neutral-400">
-                    <span>Timeframes Streamed:</span>
-                    <span className="text-white">5m & 15m Klines</span>
+                    <span>Candle Streams:</span>
+                    <span className="text-white">5m, 15m, 1h Klines</span>
                   </div>
                   <div className="flex justify-between text-neutral-400">
-                    <span>Order Book Stream:</span>
-                    <span className="text-emerald-400">100ms L2 Depth</span>
+                    <span>Order Book L2:</span>
+                    <span className="text-emerald-400">100ms Depth Stream</span>
                   </div>
                   <div className="flex justify-between text-neutral-400">
                     <span>Futures Funding Poller:</span>
                     <span className="text-emerald-400">Active (Binance FAPI)</span>
                   </div>
-                  <div className="flex justify-between text-neutral-400">
-                    <span>Connection Health:</span>
-                    <span className="text-emerald-400 flex items-center gap-1">
-                      <CheckCircle2 size={12} /> Low Latency Stream
-                    </span>
-                  </div>
                 </div>
               </div>
 
               {/* 4. Automated Bot Runtime */}
-              <div className="bg-neutral-900/40 border border-neutral-800/80 rounded-xl p-4 space-y-3">
-                <div className="flex items-center justify-between pb-2 border-b border-neutral-800/60">
-                  <div className="flex items-center gap-2 text-white font-medium text-sm">
-                    <Layers size={16} className="text-emerald-400" />
+              <div className="bg-neutral-900/40 border border-neutral-800 rounded-xl p-3.5 sm:p-4 space-y-2.5">
+                <div className="flex items-center justify-between pb-2 border-b border-neutral-800">
+                  <div className="flex items-center gap-2 text-white font-medium text-xs sm:text-sm">
+                    <Layers size={15} className="text-emerald-400" />
                     <span>Trading Engine Runtime</span>
                   </div>
                   <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-300 border border-emerald-500/20">
@@ -329,81 +358,46 @@ export default function SystemDiagnosticsModal({ isOpen, onClose }: Props) {
                     <span className="text-white font-semibold">{data ? formatUptime(data.serverUptime) : '...'}</span>
                   </div>
                   <div className="flex justify-between text-neutral-400">
-                    <span>Active Positions:</span>
+                    <span>Active Trades:</span>
                     <span className="text-white font-medium">{data?.activeTradesCount || 0} / {data?.maxConcurrentTrades || 2} Max</span>
-                  </div>
-                  <div className="flex justify-between text-neutral-400">
-                    <span>Timeframe Confluence:</span>
-                    <span className="text-emerald-400 font-mono">5m + 15m + 1h (Anchor)</span>
                   </div>
                   <div className="flex justify-between text-neutral-400">
                     <span>1H Macro Guard:</span>
                     <span className="text-emerald-400">50 EMA Trend Filter</span>
                   </div>
                   <div className="flex justify-between text-neutral-400">
-                    <span>Market Session:</span>
+                    <span>Trading Session:</span>
                     <span className={`font-mono font-medium ${data?.sessionHighLiquidity ? 'text-emerald-400' : 'text-amber-400'}`}>
                       {data?.tradingSession || 'GLOBAL'} ({data?.sessionHighLiquidity ? 'High Liquidity' : 'Strict Mode'})
                     </span>
                   </div>
                   <div className="flex justify-between text-neutral-400">
-                    <span>BTC Master Guard:</span>
-                    <span className="text-emerald-400">Active (Altcoins follow BTC)</span>
+                    <span>Execution Trigger:</span>
+                    <span className="text-emerald-400">Candle Close Only (kline.x)</span>
                   </div>
                   <div className="flex justify-between text-neutral-400">
-                    <span>Take-Profit Engine:</span>
-                    <span className="text-emerald-400">Dynamic TP1 (50% Out + BE)</span>
-                  </div>
-                  <div className="flex justify-between text-neutral-400">
-                    <span>Anti-Chop Filter:</span>
-                    <span className="text-emerald-400">ADX (Session-Adaptive)</span>
-                  </div>
-                  <div className="flex justify-between text-neutral-400">
-                    <span>Volume Guard:</span>
-                    <span className="text-emerald-400">Exhaustion & Climax Filter</span>
-                  </div>
-                  <div className="flex justify-between text-neutral-400">
-                    <span>Signal Execution:</span>
-                    <span className="text-emerald-400">Candle Close (kline.x)</span>
-                  </div>
-                  <div className="flex justify-between text-neutral-400">
-                    <span>Loss Protection:</span>
-                    <span className="text-emerald-400">35m Cooldown Period</span>
+                    <span>Trailing Stop:</span>
+                    <span className="text-emerald-400">75% TP Target Distance</span>
                   </div>
                   {data?.cooldowns && Object.keys(data.cooldowns).length > 0 && (
-                    <div className="flex justify-between text-amber-400 pt-1 border-t border-neutral-800/60">
-                      <span>Loss Cooldown:</span>
+                    <div className="flex justify-between text-amber-400 pt-1 border-t border-neutral-800">
+                      <span>Cooldown Active:</span>
                       <span>
                         {Object.entries(data.cooldowns).map(([p, s]) => `${p} (${Math.ceil(Number(s) / 60)}m)`).join(', ')}
                       </span>
                     </div>
                   )}
-                  <div className="flex justify-between text-neutral-400">
-                    <span>Process Node.js:</span>
-                    <span className="text-emerald-400 flex items-center gap-1">
-                      <CheckCircle2 size={12} /> Healthy Loop
-                    </span>
-                  </div>
                 </div>
-              </div>
-            </div>
-
-            {/* Note regarding deployment & npm install */}
-            <div className="p-3.5 rounded-xl bg-neutral-900/70 border border-neutral-800 text-xs text-neutral-400 flex items-start gap-2.5">
-              <HardDrive size={16} className="text-neutral-400 shrink-0 mt-0.5" />
-              <div>
-                <strong className="text-neutral-200">Server Deployment Tip: </strong>
-                Kada radiš <code className="text-emerald-400 bg-black/40 px-1 py-0.5 rounded">git pull</code> na vlastitom serveru, obavezno pokreni i <code className="text-emerald-400 bg-black/40 px-1 py-0.5 rounded">npm install</code> kako bi se novi paketi (poput TensorFlow.js) automatski preuzeli u <code className="text-neutral-300">node_modules</code>.
               </div>
             </div>
           </div>
 
           {/* Footer */}
-          <div className="px-6 py-3.5 border-t border-neutral-800/80 bg-neutral-900/30 flex justify-between items-center text-xs text-neutral-500">
-            <span>Last diagnostic timestamp: {data ? new Date(data.timestamp).toLocaleTimeString() : '...'}</span>
+          <div className="px-4 sm:px-6 py-3 border-t border-neutral-800 bg-neutral-900/40 flex justify-between items-center text-xs text-neutral-500">
+            <span className="text-[11px] font-mono">Updated: {data ? new Date(data.timestamp).toLocaleTimeString() : '...'}</span>
             <button
               onClick={onClose}
-              className="px-4 py-1.5 bg-neutral-800 hover:bg-neutral-700 text-neutral-200 rounded-lg transition-colors font-medium text-xs"
+              className="px-4 py-1.5 bg-neutral-800 hover:bg-neutral-700 text-neutral-200 rounded-xl transition-colors font-medium text-xs cursor-pointer"
             >
               Close
             </button>

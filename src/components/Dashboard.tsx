@@ -1,8 +1,9 @@
 import React, { useEffect, useState, useMemo, useRef } from 'react';
-import { Activity, Menu, Server, ChevronRight, X, ShieldCheck, Zap } from 'lucide-react';
+import { Activity, Menu, Server, ChevronRight, X, ShieldCheck, Zap, Clock, TrendingUp } from 'lucide-react';
 import SystemDiagnosticsModal from './SystemDiagnosticsModal';
 import { MT5BridgeModal } from './MT5BridgeModal';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from 'recharts';
+import { getMarketStatus } from '../lib/market_hours';
 
 interface PairStats {
   pair: string;
@@ -126,18 +127,9 @@ export default function Dashboard({ onSelectPair }: Props) {
     checkMT5();
     const mt5Interval = setInterval(checkMT5, 10000);
 
-    // Close hamburger menu when clicking outside
-    const handleClickOutside = (event: MouseEvent) => {
-      if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
-        setShowMenu(false);
-      }
-    };
-    document.addEventListener('mousedown', handleClickOutside);
-
     return () => {
       ws.close();
       clearInterval(mt5Interval);
-      document.removeEventListener('mousedown', handleClickOutside);
     };
   }, []);
 
@@ -167,13 +159,13 @@ export default function Dashboard({ onSelectPair }: Props) {
 
   return (
     <div className="h-[100dvh] w-full bg-neutral-950 flex flex-col font-sans text-white overflow-y-auto">
-      {/* Top 35% - Statistics & Navigation Header */}
+      {/* Top Section - Statistics & Navigation Header */}
       <div className="w-full border-b border-neutral-900 flex flex-col lg:flex-row items-center p-4 lg:p-8 bg-neutral-950/80 backdrop-blur-xl shadow-lg z-10 relative">
         
-        {/* Top-Right Modern Classic Hamburger Menu */}
-        <div className="absolute top-4 right-4 z-40" ref={menuRef}>
+        {/* Top-Right Hamburger Button */}
+        <div className="absolute top-4 right-4 z-40">
           <button
-            onClick={() => setShowMenu(prev => !prev)}
+            onClick={() => setShowMenu(true)}
             aria-label="Toggle system navigation menu"
             className="flex items-center gap-2 px-3 py-2 sm:px-3.5 sm:py-2.5 rounded-xl bg-neutral-900/95 hover:bg-neutral-850 border border-neutral-800 hover:border-neutral-700 text-neutral-200 hover:text-white transition-all shadow-md active:scale-95 group backdrop-blur-md cursor-pointer relative"
           >
@@ -187,111 +179,8 @@ export default function Dashboard({ onSelectPair }: Props) {
               </span>
             </div>
             <div className="w-px h-4 bg-neutral-800 mx-0.5 hidden sm:block"></div>
-            {showMenu ? (
-              <X size={18} className="text-neutral-300 group-hover:text-white transition-transform" />
-            ) : (
-              <Menu size={18} className="text-neutral-300 group-hover:text-white transition-transform" />
-            )}
+            <Menu size={18} className="text-neutral-300 group-hover:text-white transition-transform" />
           </button>
-
-          {/* Hamburger Dropdown Drawer / Panel */}
-          {showMenu && (
-            <div className="absolute right-0 mt-2.5 w-[calc(100vw-2rem)] sm:w-80 max-w-sm bg-neutral-925/95 border border-neutral-800/90 rounded-2xl shadow-2xl p-2.5 text-xs backdrop-blur-2xl z-50 animate-in fade-in slide-in-from-top-2 duration-200">
-              {/* Header inside menu */}
-              <div className="px-3 py-2.5 mb-1 border-b border-neutral-800/80 flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <div className="w-2 h-2 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.6)]"></div>
-                  <span className="font-semibold tracking-wide text-neutral-200 text-xs uppercase font-mono">
-                    System Architecture
-                  </span>
-                </div>
-                <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-medium bg-neutral-900 border border-neutral-800 text-neutral-400">
-                  v2.50
-                </span>
-              </div>
-
-              {/* Menu Navigation Options */}
-              <div className="space-y-1.5 py-1">
-                {/* Option 1: System Diagnostics */}
-                <button
-                  onClick={() => {
-                    setShowMenu(false);
-                    setShowDiagnostics(true);
-                  }}
-                  className="w-full min-h-[48px] flex items-center justify-between p-2.5 rounded-xl bg-neutral-900/40 hover:bg-neutral-850/80 border border-transparent hover:border-neutral-800 text-neutral-300 hover:text-white transition-all group cursor-pointer text-left"
-                >
-                  <div className="flex items-center gap-3">
-                    <div className="p-2 rounded-lg bg-neutral-900 border border-neutral-800 text-emerald-400 group-hover:border-emerald-500/40 group-hover:bg-emerald-950/20 transition-all">
-                      <Activity size={16} />
-                    </div>
-                    <div>
-                      <div className="font-semibold text-neutral-200 group-hover:text-white text-xs">
-                        System Diagnostics & Health
-                      </div>
-                      <div className="text-[10px] text-neutral-500">
-                        Live bot telemetry, DB latency & AI engine
-                      </div>
-                    </div>
-                  </div>
-                  <ChevronRight size={15} className="text-neutral-600 group-hover:text-neutral-300 group-hover:translate-x-0.5 transition-all flex-shrink-0" />
-                </button>
-
-                {/* Option 2: MT5 Bridge Hub */}
-                <button
-                  onClick={() => {
-                    setShowMenu(false);
-                    setShowMT5Bridge(true);
-                  }}
-                  className="w-full min-h-[48px] flex items-center justify-between p-2.5 rounded-xl bg-neutral-900/40 hover:bg-neutral-850/80 border border-transparent hover:border-neutral-800 text-neutral-300 hover:text-white transition-all group cursor-pointer text-left"
-                >
-                  <div className="flex items-center gap-3">
-                    <div className="p-2 rounded-lg bg-neutral-900 border border-neutral-800 text-blue-400 group-hover:border-blue-500/40 group-hover:bg-blue-950/20 transition-all">
-                      <Server size={16} />
-                    </div>
-                    <div>
-                      <div className="flex items-center gap-1.5">
-                        <span className="font-semibold text-neutral-200 group-hover:text-white text-xs">
-                          MetaTrader 5 Bridge Hub
-                        </span>
-                        <span className={`h-1.5 w-1.5 rounded-full ${mt5Connected ? 'bg-emerald-400' : 'bg-amber-400'}`}></span>
-                      </div>
-                      <div className="text-[10px] text-neutral-500">
-                        Vantage auto-lot, EA generator & sync
-                      </div>
-                    </div>
-                  </div>
-                  <ChevronRight size={15} className="text-neutral-600 group-hover:text-neutral-300 group-hover:translate-x-0.5 transition-all flex-shrink-0" />
-                </button>
-
-                {/* Option 3: Spread & Risk Filter Protocol Indicator */}
-                <div className="p-2.5 rounded-xl bg-neutral-900/50 border border-neutral-850 text-neutral-300 flex items-start gap-3">
-                  <div className="p-2 rounded-lg bg-neutral-900 border border-neutral-800 text-purple-400 flex-shrink-0">
-                    <ShieldCheck size={16} />
-                  </div>
-                  <div className="flex-1">
-                    <div className="flex items-center justify-between">
-                      <span className="font-semibold text-neutral-200 text-xs">Spread & R:R Protocol</span>
-                      <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-purple-950/60 text-purple-300 border border-purple-800/40">
-                        ACTIVE
-                      </span>
-                    </div>
-                    <div className="text-[10px] text-neutral-400 mt-1 leading-relaxed">
-                      1.85:1 Min R:R + Broker Spread Buffer & Multi-TF Trend Locks.
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              {/* Status Footer in Hamburger Menu */}
-              <div className="mt-2 pt-2 border-t border-neutral-850 px-2 flex items-center justify-between text-[10px] font-mono text-neutral-500">
-                <span>MT5 Connection:</span>
-                <span className={mt5Connected ? "text-emerald-400 font-semibold flex items-center gap-1" : "text-amber-400/90 font-semibold flex items-center gap-1"}>
-                  <span className={`w-1.5 h-1.5 rounded-full ${mt5Connected ? 'bg-emerald-400' : 'bg-amber-400'}`}></span>
-                  {mt5Connected ? "LINKED & ONLINE" : "WAITING EA CLIENT"}
-                </span>
-              </div>
-            </div>
-          )}
         </div>
 
         {/* Left Side: Donut Chart with Total Wins / Losses & Win Rate % */}
@@ -341,19 +230,21 @@ export default function Dashboard({ onSelectPair }: Props) {
 
         {/* Right Side: Pair Summary (2 rows) */}
         <div className="w-full lg:w-2/3 lg:pl-10 flex items-center">
-          <div className="grid grid-cols-2 md:grid-cols-3 gap-4 lg:gap-6 w-full">
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-3 sm:gap-4 lg:gap-6 w-full">
             {PAIRS.map(pair => {
               const pStats = stats[pair] || { won: 0, lost: 0 };
               const total = pStats.won + pStats.lost;
               const winRate = total > 0 ? Math.round((pStats.won / total) * 100) : 0;
+              const marketStatus = getMarketStatus(pair);
+
               return (
                 <div key={pair} className="flex items-center gap-3 bg-neutral-900/50 rounded-xl p-3 border border-neutral-800/50">
                   <div className="w-3 h-3 rounded-full flex-shrink-0" style={{ backgroundColor: COLORS[pair] }} />
                   <div className="flex-1 min-w-0">
-                    <div className="flex items-center justify-between">
+                    <div className="flex items-center justify-between gap-1">
                       <span className="text-sm font-bold text-neutral-200 truncate">{pair}</span>
-                      <span className={`text-[9px] font-mono font-bold px-1 rounded border ${PAIR_INFO[pair]?.tagColor || 'text-neutral-400 bg-neutral-900 border-neutral-800'}`}>
-                        {PAIR_INFO[pair]?.badge || 'ASSET'}
+                      <span className={`text-[8px] font-mono font-bold px-1 rounded border ${marketStatus.isOpen ? (PAIR_INFO[pair]?.tagColor || 'text-neutral-400 bg-neutral-900 border-neutral-800') : 'text-rose-400 bg-rose-500/10 border-rose-500/20'}`}>
+                        {marketStatus.isOpen ? (PAIR_INFO[pair]?.badge || 'ASSET') : 'CLOSED'}
                       </span>
                     </div>
                     <div className="text-xs text-neutral-500 truncate mt-0.5">
@@ -369,12 +260,12 @@ export default function Dashboard({ onSelectPair }: Props) {
         </div>
       </div>
 
-      {/* Bottom 65% - List of Pairs */}
+      {/* Bottom Section - Watchlist (Clean Title & Market Closed Tags) */}
       <div className="flex-1 w-full max-w-7xl mx-auto bg-neutral-950 p-4 lg:p-8">
         <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-bold text-neutral-300">Quantitative Algo Watchlist</h2>
-          <span className="text-xs font-mono text-neutral-500">6 Verified Low-Spread Assets</span>
+          <h2 className="text-lg font-bold text-neutral-200 tracking-tight">Watchlist</h2>
         </div>
+
         <div className="grid gap-3">
           {PAIRS.map(pair => {
              const pStats = stats[pair] || { won: 0, lost: 0 };
@@ -382,23 +273,37 @@ export default function Dashboard({ onSelectPair }: Props) {
              const winRate = total > 0 ? Math.round((pStats.won / total) * 100) : 0;
              const price = prices[pair] || 0;
              const info = PAIR_INFO[pair];
+             const marketStatus = getMarketStatus(pair);
              
              return (
                <div 
                  key={pair} 
                  onClick={() => onSelectPair(pair)}
-                 className="group flex flex-col sm:flex-row sm:items-center justify-between p-4 lg:p-5 rounded-2xl bg-neutral-900/60 border border-neutral-800 hover:border-blue-500/50 cursor-pointer transition-all hover:bg-neutral-850 hover:shadow-[0_8px_30px_rgba(59,130,246,0.1)]"
+                 className={`group flex flex-col sm:flex-row sm:items-center justify-between p-4 lg:p-5 rounded-2xl bg-neutral-900/60 border ${
+                   marketStatus.isOpen 
+                     ? 'border-neutral-800 hover:border-blue-500/50 hover:bg-neutral-850 hover:shadow-[0_8px_30px_rgba(59,130,246,0.1)]' 
+                     : 'border-neutral-850/80 hover:border-neutral-700 bg-neutral-900/40 opacity-90'
+                 } cursor-pointer transition-all`}
                >
-                 <div className="flex items-center gap-4 mb-4 sm:mb-0">
-                   <div className="w-12 h-12 rounded-2xl flex items-center justify-center font-bold text-xs font-mono shadow-inner flex-shrink-0" style={{ backgroundColor: `${COLORS[pair]}15`, color: COLORS[pair], border: `1px solid ${COLORS[pair]}40` }}>
+                 <div className="flex items-center gap-4 mb-3 sm:mb-0">
+                   <div 
+                     className="w-12 h-12 rounded-2xl flex items-center justify-center font-bold text-xs font-mono shadow-inner flex-shrink-0" 
+                     style={{ backgroundColor: `${COLORS[pair]}15`, color: COLORS[pair], border: `1px solid ${COLORS[pair]}40` }}
+                   >
                      {pair.replace('USD', '')}
                    </div>
                    <div>
-                     <div className="flex items-center gap-2">
-                       <span className="text-xl font-bold tracking-tight">{pair}</span>
+                     <div className="flex items-center gap-2 flex-wrap">
+                       <span className="text-lg sm:text-xl font-bold tracking-tight text-white">{pair}</span>
                        <span className={`text-[10px] font-mono px-2 py-0.5 rounded-full font-bold border ${info?.tagColor || 'text-neutral-400 bg-neutral-900 border-neutral-800'}`}>
                          {info?.badge || 'ASSET'}
                        </span>
+                       
+                       {/* Market Open/Closed Badge */}
+                       <span className={`text-[9px] font-mono px-2 py-0.5 rounded-full font-bold border ${marketStatus.badgeColor}`}>
+                         {marketStatus.statusText}
+                       </span>
+
                        {pStats.active > 0 && (
                          <div className="relative flex h-2.5 w-2.5" title="Active Trade Running">
                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
@@ -406,12 +311,20 @@ export default function Dashboard({ onSelectPair }: Props) {
                          </div>
                        )}
                      </div>
-                     <div className="text-xs text-neutral-400 mt-0.5">{info?.label || 'Quantitative Algorithmic Trading'}</div>
+
+                     <div className="text-xs text-neutral-400 mt-1 flex items-center gap-2 flex-wrap">
+                       <span>{info?.label || 'Quantitative Algorithmic Trading'}</span>
+                       {!marketStatus.isOpen && (
+                         <span className="text-amber-400/90 font-mono text-[11px] font-medium flex items-center gap-1">
+                           • <Clock size={11} /> {marketStatus.scheduleText}
+                         </span>
+                       )}
+                     </div>
                    </div>
                  </div>
                  
-                 <div className="flex items-center justify-between sm:justify-end sm:gap-12 w-full sm:w-auto border-t sm:border-t-0 border-neutral-800/50 pt-4 sm:pt-0">
-                   <div className="text-right">
+                 <div className="flex items-center justify-between sm:justify-end sm:gap-10 lg:gap-12 w-full sm:w-auto border-t sm:border-t-0 border-neutral-800/50 pt-3 sm:pt-0">
+                   <div className="text-left sm:text-right">
                      <div className="text-xs text-neutral-500 mb-0.5">Win Rate</div>
                      <div className="font-mono flex items-center gap-1.5">
                        <span className="text-emerald-400 font-bold">{pStats.won}W</span>
@@ -423,9 +336,9 @@ export default function Dashboard({ onSelectPair }: Props) {
                      </div>
                    </div>
                    
-                   <div className="text-right min-w-[130px]">
+                   <div className="text-right min-w-[120px]">
                      <div className="text-xs text-neutral-500 mb-0.5">Market Price</div>
-                     <div className="font-mono text-xl font-bold text-neutral-100">
+                     <div className="font-mono text-lg sm:text-xl font-bold text-neutral-100">
                        {price > 0 ? (price < 5 ? `$${price.toFixed(4)}` : `$${price.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`) : '...'}
                      </div>
                    </div>
@@ -435,6 +348,163 @@ export default function Dashboard({ onSelectPair }: Props) {
           })}
         </div>
       </div>
+
+      {/* FULL PAGE / DRAWER HAMBURGER MENU FROM THE RIGHT (Solid Black Background) */}
+      {showMenu && (
+        <div className="fixed inset-0 z-50 flex justify-end bg-black/80 backdrop-blur-md animate-in fade-in duration-200">
+          {/* Backdrop Click */}
+          <div className="absolute inset-0" onClick={() => setShowMenu(false)} />
+
+          {/* Pure Black Side Drawer Container */}
+          <div 
+            ref={menuRef}
+            className="relative z-10 w-full sm:max-w-md h-full bg-black text-white flex flex-col shadow-2xl border-l border-neutral-900 overflow-y-auto animate-in slide-in-from-right duration-250 ease-out"
+          >
+            {/* Header */}
+            <div className="sticky top-0 z-20 bg-black/95 backdrop-blur-lg border-b border-neutral-900 px-5 py-4 flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <div className="w-2.5 h-2.5 rounded-full bg-emerald-500 shadow-[0_0_10px_rgba(16,185,129,0.7)] animate-pulse"></div>
+                <div>
+                  <h3 className="font-bold text-sm tracking-tight text-white uppercase font-mono">Control & System Hub</h3>
+                  <p className="text-[10px] text-neutral-500 font-mono">Quant Engine Architecture v2.5</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowMenu(false)}
+                aria-label="Close menu"
+                className="p-2 rounded-xl bg-neutral-900 hover:bg-neutral-800 text-neutral-400 hover:text-white border border-neutral-800 transition-colors cursor-pointer"
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            {/* Content Body inside Black Menu */}
+            <div className="p-5 space-y-4 flex-1">
+              
+              {/* Option 1: System Diagnostics & Health Check */}
+              <button
+                onClick={() => {
+                  setShowMenu(false);
+                  setShowDiagnostics(true);
+                }}
+                className="w-full p-4 rounded-2xl bg-neutral-950 hover:bg-neutral-900 border border-neutral-850 hover:border-emerald-500/40 text-left transition-all group cursor-pointer shadow-lg"
+              >
+                <div className="flex items-start justify-between">
+                  <div className="flex items-start gap-3.5">
+                    <div className="p-2.5 rounded-xl bg-neutral-900 border border-neutral-800 text-emerald-400 group-hover:bg-emerald-950/30 group-hover:border-emerald-500/40 transition-all shrink-0">
+                      <Activity size={20} />
+                    </div>
+                    <div>
+                      <div className="font-bold text-white text-sm flex items-center gap-2">
+                        System Diagnostics & Health
+                      </div>
+                      <p className="text-xs text-neutral-400 mt-1 leading-relaxed">
+                        Live scan of Confluence Engine, SQLite DB latency, WebSocket streams & memory.
+                      </p>
+                    </div>
+                  </div>
+                  <ChevronRight size={18} className="text-neutral-600 group-hover:text-emerald-400 group-hover:translate-x-1 transition-all shrink-0 mt-1" />
+                </div>
+              </button>
+
+              {/* Option 2: MetaTrader 5 Bridge */}
+              <button
+                onClick={() => {
+                  setShowMenu(false);
+                  setShowMT5Bridge(true);
+                }}
+                className="w-full p-4 rounded-2xl bg-neutral-950 hover:bg-neutral-900 border border-neutral-850 hover:border-blue-500/40 text-left transition-all group cursor-pointer shadow-lg"
+              >
+                <div className="flex items-start justify-between">
+                  <div className="flex items-start gap-3.5">
+                    <div className="p-2.5 rounded-xl bg-neutral-900 border border-neutral-800 text-blue-400 group-hover:bg-blue-950/30 group-hover:border-blue-500/40 transition-all shrink-0">
+                      <Server size={20} />
+                    </div>
+                    <div>
+                      <div className="font-bold text-white text-sm flex items-center gap-2">
+                        MetaTrader 5 Bridge Hub
+                        <span className={`w-2 h-2 rounded-full ${mt5Connected ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'}`}></span>
+                      </div>
+                      <p className="text-xs text-neutral-400 mt-1 leading-relaxed">
+                        Vantage auto-lot size config, Oracle VPS IP sync, MQL5 EA code generator & live terminal telemetry.
+                      </p>
+                    </div>
+                  </div>
+                  <ChevronRight size={18} className="text-neutral-600 group-hover:text-blue-400 group-hover:translate-x-1 transition-all shrink-0 mt-1" />
+                </div>
+              </button>
+
+              {/* Option 3: Market Hours & Weekend Auto-Guard */}
+              <div className="p-4 rounded-2xl bg-neutral-950 border border-neutral-850 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2 text-amber-400 font-semibold text-xs">
+                    <Clock size={16} />
+                    <span>Market Hours & Weekend Guard</span>
+                  </div>
+                  <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-amber-500/10 text-amber-400 border border-amber-500/20">
+                    AUTOMATIC
+                  </span>
+                </div>
+                <p className="text-xs text-neutral-400 leading-relaxed">
+                  Bot automatski prepoznaje vikend pauzu za Forex (EURUSD, GBPUSD) i Zlato (XAUUSD) od petka 21:00 UTC do nedelje 21:00 UTC. Kripto parovi (BTC, ETH, SOL) trguju neprekidno 24/7.
+                </p>
+                <div className="grid grid-cols-2 gap-2 pt-1 font-mono text-[11px]">
+                  <div className="p-2 rounded-lg bg-neutral-900 border border-neutral-800 flex justify-between items-center">
+                    <span className="text-neutral-300">Crypto (BTC, ETH, SOL)</span>
+                    <span className="text-emerald-400 font-bold">24/7 LIVE</span>
+                  </div>
+                  <div className="p-2 rounded-lg bg-neutral-900 border border-neutral-800 flex justify-between items-center">
+                    <span className="text-neutral-300">Forex & Spot Gold</span>
+                    <span className="text-amber-400 font-bold">MON-FRI</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Option 4: Risk Protocol Card */}
+              <div className="p-4 rounded-2xl bg-neutral-950 border border-neutral-850 space-y-2.5">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2 text-purple-400 font-semibold text-xs">
+                    <ShieldCheck size={16} />
+                    <span>Spread & R:R Protection Protocol</span>
+                  </div>
+                  <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-purple-500/10 text-purple-300 border border-purple-500/20">
+                    PROTECTED
+                  </span>
+                </div>
+                <div className="text-xs text-neutral-400 space-y-1.5 leading-relaxed">
+                  <div className="flex justify-between border-b border-neutral-900 pb-1">
+                    <span>Min Risk/Reward:</span>
+                    <span className="font-mono text-white font-bold">1.85 : 1 (do 3.6 : 1)</span>
+                  </div>
+                  <div className="flex justify-between border-b border-neutral-900 pb-1">
+                    <span>TP1 Partial Profit:</span>
+                    <span className="font-mono text-emerald-400 font-semibold">50% Out + Break-Even</span>
+                  </div>
+                  <div className="flex justify-between border-b border-neutral-900 pb-1">
+                    <span>Trailing Stop:</span>
+                    <span className="font-mono text-emerald-400 font-semibold">75% TP Target Distance</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>Loss Protection:</span>
+                    <span className="font-mono text-white font-semibold">35m Cool-off per pair</span>
+                  </div>
+                </div>
+              </div>
+
+            </div>
+
+            {/* Menu Footer */}
+            <div className="sticky bottom-0 bg-black/95 border-t border-neutral-900 p-4 flex items-center justify-between text-[11px] font-mono text-neutral-500">
+              <span>Terminal Status:</span>
+              <span className={mt5Connected ? "text-emerald-400 font-semibold flex items-center gap-1.5" : "text-amber-400/90 font-semibold flex items-center gap-1.5"}>
+                <span className={`w-2 h-2 rounded-full ${mt5Connected ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'}`}></span>
+                {mt5Connected ? "MT5 TERMINAL SYNCED" : "WAITING EA PULSE"}
+              </span>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Diagnostics Modal */}
       <SystemDiagnosticsModal
         isOpen={showDiagnostics}
