@@ -359,7 +359,11 @@ export default function SystemDiagnosticsModal({ isOpen, onClose }: Props) {
                   </div>
                   <div className="flex justify-between text-neutral-400">
                     <span>Active Trades:</span>
-                    <span className="text-white font-medium">{data?.activeTradesCount || 0} / {data?.maxConcurrentTrades || 2} Max</span>
+                    <span className="text-white font-medium">{data?.activeTradesCount || 0} / {data?.maxConcurrentTrades || 4} Max Portfolio</span>
+                  </div>
+                  <div className="flex justify-between text-neutral-400">
+                    <span>Asset Class Limits:</span>
+                    <span className="text-emerald-400 font-mono text-[11px]">Crypto 2 | Forex 2 | Gold 1</span>
                   </div>
                   <div className="flex justify-between text-neutral-400">
                     <span>1H Macro Guard:</span>

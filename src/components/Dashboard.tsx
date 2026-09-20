@@ -473,6 +473,10 @@ export default function Dashboard({ onSelectPair }: Props) {
                 </div>
                 <div className="text-xs text-neutral-400 space-y-1.5 leading-relaxed">
                   <div className="flex justify-between border-b border-neutral-900 pb-1">
+                    <span>Portfolio Exposure:</span>
+                    <span className="font-mono text-emerald-400 font-bold">Max 4 (Crypto 2, FX 2, Gold 1)</span>
+                  </div>
+                  <div className="flex justify-between border-b border-neutral-900 pb-1">
                     <span>Min Risk/Reward:</span>
                     <span className="font-mono text-white font-bold">1.85 : 1 (do 3.6 : 1)</span>
                   </div>

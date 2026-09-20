@@ -423,10 +423,45 @@ export class TradingBot {
       return;
     }
 
-    // 2. Global Exposure & Correlation Limit: Max 2 active trades across entire bot
-    const openTradesCount = Object.values(this.activeTrades).filter(t => t !== null).length;
-    if (openTradesCount >= 2) {
-      return; // Reject 3rd trade to prevent concentrated portfolio risk
+    // 2. SMART MULTI-ASSET EXPOSURE & CORRELATION SHIELD
+    // For 6 diversified pairs (Crypto, Forex, Gold):
+    // - Global Portfolio Limit: Max 4 concurrent trades (across all 6 pairs)
+    // - Asset Class Correlation Limits:
+    //    * Crypto (BTC, ETH, SOL): Max 2 concurrent trades
+    //    * Forex (EURUSD, GBPUSD): Max 2 concurrent trades
+    //    * Commodity / Gold (XAUUSD): Max 1 concurrent trade
+    // - Risk-free bonus: Trades that already reached TP1 (Stop Loss @ Break-Even) do not count against risk capacity!
+    const activeList = Object.values(this.activeTrades).filter(t => t !== null);
+    
+    // Total open positions check (Global Max: 4)
+    if (activeList.length >= 4) {
+      return; // Absolute max portfolio exposure reached
+    }
+
+    // Determine current asset class
+    const isCrypto = symbol.includes('BTC') || symbol.includes('ETH') || symbol.includes('SOL');
+    const isForex = symbol.includes('EUR') || symbol.includes('GBP');
+    const isGold = symbol.includes('XAU') || symbol.includes('PAXG') || symbol.includes('GOLD');
+
+    // Count active risk-exposed positions in this specific asset class (excluding de-risked Break-Even trades)
+    const activeClassTrades = activeList.filter(t => {
+      if (!t) return false;
+      const tSymbol = t.pair;
+      if (isCrypto && (tSymbol.includes('BTC') || tSymbol.includes('ETH') || tSymbol.includes('SOL'))) return true;
+      if (isForex && (tSymbol.includes('EUR') || tSymbol.includes('GBP'))) return true;
+      if (isGold && (tSymbol.includes('XAU') || tSymbol.includes('PAXG') || tSymbol.includes('GOLD'))) return true;
+      return false;
+    });
+
+    if (isCrypto && activeClassTrades.length >= 2) {
+      // Prevents 3x correlated drawdown if BTC moves violently
+      return;
+    }
+    if (isForex && activeClassTrades.length >= 2) {
+      return;
+    }
+    if (isGold && activeClassTrades.length >= 1) {
+      return;
     }
 
     const data5m = this.data5m[symbol];
@@ -454,7 +489,6 @@ export class TradingBot {
 
     // 4. BTC MASTER TREND GUARD (Only for Crypto pairs: ETH, SOL)
     // Non-crypto pairs (XAUUSD, EURUSD, GBPUSD) trade independently on their own 1H Macro Trends
-    const isCrypto = symbol.includes('BTC') || symbol.includes('ETH') || symbol.includes('SOL');
     let btcBullish = true;
     if (isCrypto && symbol !== 'BTCUSDT') {
       const btc15m = this.data15m['BTCUSDT'];
@@ -748,7 +782,12 @@ export class TradingBot {
       sessionHighLiquidity: sessionInfo.isHighLiquidity,
       monitoredPairs: PAIRS,
       timeframes: ['5m (Execution)', '15m (Momentum)', '1h (Anchor Macro Trend)'],
-      maxConcurrentTrades: 2,
+      maxConcurrentTrades: 4,
+      assetClassLimits: {
+        crypto: 'Max 2 (BTC/ETH/SOL)',
+        forex: 'Max 2 (EUR/GBP)',
+        commodity: 'Max 1 (XAUUSD)'
+      },
       activeTradesCount: activeTradesList.length,
       activeTrades: activeTradesList,
       cooldowns: activeCooldowns,
