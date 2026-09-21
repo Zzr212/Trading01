@@ -347,21 +347,21 @@ export function getTradingSessionInfo(): { session: 'LONDON' | 'NEW_YORK' | 'LON
 
   // London & New York Overlap: 13:00 - 16:30 UTC (Prime Volatility)
   if (utcHour >= 13 && utcHour < 17) {
-    return { session: 'LONDON_NY_OVERLAP', isHighLiquidity: true, minAdxThreshold: 20 };
+    return { session: 'LONDON_NY_OVERLAP', isHighLiquidity: true, minAdxThreshold: 17 };
   }
   // London Session: 08:00 - 13:00 UTC
   if (utcHour >= 8 && utcHour < 13) {
-    return { session: 'LONDON', isHighLiquidity: true, minAdxThreshold: 22 };
+    return { session: 'LONDON', isHighLiquidity: true, minAdxThreshold: 18 };
   }
   // New York Session Afternoon: 17:00 - 21:00 UTC
   if (utcHour >= 17 && utcHour < 21) {
-    return { session: 'NEW_YORK', isHighLiquidity: true, minAdxThreshold: 22 };
+    return { session: 'NEW_YORK', isHighLiquidity: true, minAdxThreshold: 18 };
   }
   // Asian Session: 00:00 - 08:00 UTC
   if (utcHour >= 0 && utcHour < 8) {
-    return { session: 'ASIA', isHighLiquidity: false, minAdxThreshold: 25 };
+    return { session: 'ASIA', isHighLiquidity: false, minAdxThreshold: 22 };
   }
   // Off-peak Dead Zone: 21:00 - 24:00 UTC (Prone to low-volume chops & manipulation)
-  return { session: 'OFF_PEAK', isHighLiquidity: false, minAdxThreshold: 27 };
+  return { session: 'OFF_PEAK', isHighLiquidity: false, minAdxThreshold: 24 };
 }
 

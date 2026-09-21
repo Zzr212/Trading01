@@ -548,18 +548,29 @@ export class TradingBot {
     const isUptrend = macroBullish && currentPrice > c_vwap && c_pDi > c_mDi;
     const isDowntrend = macroBearish && currentPrice < c_vwap && c_mDi > c_pDi;
     
+    // 1. Fresh Crossover triggers
     const isMacdBullishCross = c_macd > 0 && p_macd <= 0;
     const isMacdBearishCross = c_macd < 0 && p_macd >= 0;
     
     const isEmaBullishCross = c_ema9 > c_ema21 && p_ema9 <= p_ema21;
     const isEmaBearishCross = c_ema9 < c_ema21 && p_ema9 >= p_ema21;
 
-    // Filter extreme overbought/oversold
-    const validLongRsi = c_rsi > 42 && c_rsi < 68;
-    const validShortRsi = c_rsi < 58 && c_rsi > 32;
+    // 2. Trend Continuation & Momentum Acceleration triggers (so we don't miss strong moves)
+    const isBullishExpansion = c_ema9 > c_ema21 && c_macd > 0 && c_macd >= p_macd && currentPrice >= c_ema9;
+    const isBearishExpansion = c_ema9 < c_ema21 && c_macd < 0 && c_macd <= p_macd && currentPrice <= c_ema9;
 
-    let isLongSetup = isUptrend && validLongRsi && (isMacdBullishCross || isEmaBullishCross);
-    let isShortSetup = isDowntrend && validShortRsi && (isMacdBearishCross || isEmaBearishCross);
+    // 3. Dynamic Pullback & Bounce triggers
+    const lastCandle = data5m[data5m.length - 1];
+    const prevCandle = data5m[data5m.length - 2];
+    const isBullishPullbackBounce = c_ema9 > c_ema21 && c_macd > 0 && lastCandle.close > lastCandle.open && prevCandle.low <= (c_ema21 * 1.001);
+    const isBearishPullbackReject = c_ema9 < c_ema21 && c_macd < 0 && lastCandle.close < lastCandle.open && prevCandle.high >= (c_ema21 * 0.999);
+
+    // Filter extreme overbought/oversold
+    const validLongRsi = c_rsi >= 40 && c_rsi <= 70;
+    const validShortRsi = c_rsi <= 60 && c_rsi >= 30;
+
+    let isLongSetup = isUptrend && validLongRsi && (isMacdBullishCross || isEmaBullishCross || isBullishExpansion || isBullishPullbackBounce);
+    let isShortSetup = isDowntrend && validShortRsi && (isMacdBearishCross || isEmaBearishCross || isBearishExpansion || isBearishPullbackReject);
 
     // Apply 1-Hour Higher Timeframe Anchor Trend Filter
     // Strictly forbid LONGs if 1h is in a clear downtrend, and forbid SHORTs if 1h is in a clear uptrend!
