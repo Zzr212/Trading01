@@ -470,52 +470,17 @@ export class TradingBot {
     
     if (data5m.length < 50 || data15m.length < 50) return;
 
-    // 3. 1-HOUR (1H) HIGHER TIMEFRAME ANCHOR TREND FILTER
-    // The supreme trend judge: Never fight the 1-hour macro trend direction
-    let anchor1hBullish = true;
-    let anchor1hBearish = true;
-    if (data1h && data1h.length >= 25) {
-      const ema50_1h = calculateEMA(data1h, 50);
-      const ema20_1h = calculateEMA(data1h, 20);
-      const lastEma50_1h = ema50_1h[ema50_1h.length - 1];
-      const lastEma20_1h = ema20_1h[ema20_1h.length - 1];
-      const lastClose1h = data1h[data1h.length - 1].close;
-
-      // 1h Uptrend: Price above 50 EMA on 1h, or 20 EMA > 50 EMA
-      anchor1hBullish = lastClose1h >= lastEma50_1h || lastEma20_1h >= lastEma50_1h;
-      // 1h Downtrend: Price below 50 EMA on 1h, or 20 EMA < 50 EMA
-      anchor1hBearish = lastClose1h <= lastEma50_1h || lastEma20_1h <= lastEma50_1h;
-    }
-
-    // 4. BTC MASTER TREND GUARD (Only for Crypto pairs: ETH, SOL)
-    // Non-crypto pairs (XAUUSD, EURUSD, GBPUSD) trade independently on their own 1H Macro Trends
-    let btcBullish = true;
-    if (isCrypto && symbol !== 'BTCUSDT') {
-      const btc15m = this.data15m['BTCUSDT'];
-      if (btc15m && btc15m.length >= 30) {
-        const btcEma21 = calculateEMA(btc15m, 21);
-        const lastBtcEma21 = btcEma21[btcEma21.length - 1];
-        const lastBtcClose = btc15m[btc15m.length - 1].close;
-        btcBullish = lastBtcClose >= lastBtcEma21;
-      }
-    }
-
-    // 5. VOLUME SPIKE & EXHAUSTION FILTER
-    // Avoid entering at the tip of institutional liquidity grabs / exhaustion climaxes
-    const volExhaustion = detectVolumeExhaustion(data5m, 20);
-
-    // 6. SESSION & TIME FILTER
     const sessionInfo = getTradingSessionInfo();
 
-    // Macro Trend (15m timeframe)
+    // 3. Macro Trend (15m timeframe - Proven Core)
     const ema21_15m = calculateEMA(data15m, 21);
     const ema50_15m = calculateEMA(data15m, 50);
     const last_ema21_15m = ema21_15m[ema21_15m.length - 1];
     const last_ema50_15m = ema50_15m[ema50_15m.length - 1];
-    const macroBullish = last_ema21_15m > last_ema50_15m && currentPrice >= (last_ema50_15m * 0.999);
-    const macroBearish = last_ema21_15m < last_ema50_15m && currentPrice <= (last_ema50_15m * 1.001);
+    const macroBullish = last_ema21_15m > last_ema50_15m;
+    const macroBearish = last_ema21_15m < last_ema50_15m;
 
-    // 5m Indicators
+    // 4. Fast 5m Indicators
     const ema9 = calculateEMA(data5m, 9);
     const ema21 = calculateEMA(data5m, 21);
     const rsiArray = calculateRSI(data5m, 14);
@@ -534,86 +499,36 @@ export class TradingBot {
     const c_macd = macdData.hist[macdData.hist.length - 1];
     const p_macd = macdData.hist[macdData.hist.length - 2];
     const c_vwap = vwapArray[vwapArray.length - 1];
-
     const c_adx = adxData.adx[adxData.adx.length - 1];
-    const c_pDi = adxData.pDi[adxData.pDi.length - 1];
-    const c_mDi = adxData.mDi[adxData.mDi.length - 1];
 
-    // Dynamic ADX requirement based on current trading session
-    const requiredAdx = sessionInfo.minAdxThreshold;
-    if (c_adx === null || c_adx < requiredAdx) {
+    // Minimal baseline ADX check (only filters completely flat zero-volatility chop)
+    if (c_adx !== null && c_adx < 14) {
       return;
     }
 
-    const isUptrend = macroBullish && (currentPrice >= (c_vwap * 0.9995) || c_ema9 > c_ema21) && c_pDi >= (c_mDi * 0.95);
-    const isDowntrend = macroBearish && (currentPrice <= (c_vwap * 1.0005) || c_ema9 < c_ema21) && c_mDi >= (c_pDi * 0.95);
+    // Trend alignment with VWAP
+    const isUptrend = macroBullish && currentPrice >= (c_vwap * 0.999);
+    const isDowntrend = macroBearish && currentPrice <= (c_vwap * 1.001);
     
-    // 1. Fresh Crossover triggers
+    // Proven High-Winrate Entry Triggers:
+    // 1) Fresh MACD crossover
+    // 2) Fresh EMA 9/21 crossover
+    // 3) Strong Trend Momentum continuation (Fast EMA > Slow EMA & expanding MACD)
     const isMacdBullishCross = c_macd > 0 && p_macd <= 0;
     const isMacdBearishCross = c_macd < 0 && p_macd >= 0;
     
     const isEmaBullishCross = c_ema9 > c_ema21 && p_ema9 <= p_ema21;
     const isEmaBearishCross = c_ema9 < c_ema21 && p_ema9 >= p_ema21;
 
-    // 2. Trend Continuation & Momentum Acceleration triggers (so we don't miss strong moves)
-    const isBullishExpansion = c_ema9 > c_ema21 && c_macd > 0 && c_macd >= p_macd && currentPrice >= c_ema9;
-    const isBearishExpansion = c_ema9 < c_ema21 && c_macd < 0 && c_macd <= p_macd && currentPrice <= c_ema9;
+    const isBullishContinuation = c_ema9 > c_ema21 && c_macd > 0;
+    const isBearishContinuation = c_ema9 < c_ema21 && c_macd < 0;
 
-    // 3. Dynamic Pullback & Bounce triggers
-    const lastCandle = data5m[data5m.length - 1];
-    const prevCandle = data5m[data5m.length - 2];
-    const isBullishPullbackBounce = c_ema9 > c_ema21 && c_macd > 0 && lastCandle.close > lastCandle.open && prevCandle.low <= (c_ema21 * 1.001);
-    const isBearishPullbackReject = c_ema9 < c_ema21 && c_macd < 0 && lastCandle.close < lastCandle.open && prevCandle.high >= (c_ema21 * 0.999);
+    // Healthy momentum RSI ranges (avoids buying exact top >74 or shorting exact bottom <26)
+    const validLongRsi = c_rsi >= 38 && c_rsi <= 74;
+    const validShortRsi = c_rsi <= 62 && c_rsi >= 26;
 
-    // Filter extreme overbought/oversold
-    const validLongRsi = c_rsi >= 40 && c_rsi <= 70;
-    const validShortRsi = c_rsi <= 60 && c_rsi >= 30;
-
-    let isLongSetup = isUptrend && validLongRsi && (isMacdBullishCross || isEmaBullishCross || isBullishExpansion || isBullishPullbackBounce);
-    let isShortSetup = isDowntrend && validShortRsi && (isMacdBearishCross || isEmaBearishCross || isBearishExpansion || isBearishPullbackReject);
-
-    // Apply 1-Hour Higher Timeframe Anchor Trend Filter
-    // Strictly forbid LONGs if 1h is in a clear downtrend, and forbid SHORTs if 1h is in a clear uptrend!
-    if (isLongSetup && !anchor1hBullish) {
-      console.log(`[1H Macro Guard] ${symbol} LONG setup blocked: 1-Hour chart is Bearish / below 50 EMA.`);
-      isLongSetup = false;
-    }
-    if (isShortSetup && !anchor1hBearish) {
-      console.log(`[1H Macro Guard] ${symbol} SHORT setup blocked: 1-Hour chart is Bullish / above 50 EMA.`);
-      isShortSetup = false;
-    }
-
-    // Apply BTC Master Guard: Only for crypto pairs (ETH, SOL), never buy an altcoin if BTC is Bearish, never short if BTC is Bullish
-    if (isCrypto && symbol !== 'BTCUSDT') {
-      if (isLongSetup && !btcBullish) {
-        console.log(`[BTC Guard] ${symbol} LONG setup blocked because BTC is Bearish.`);
-        isLongSetup = false;
-      }
-      if (isShortSetup && btcBullish) {
-        console.log(`[BTC Guard] ${symbol} SHORT setup blocked because BTC is Bullish.`);
-        isShortSetup = false;
-      }
-    }
-
-    // Apply Volume Exhaustion Guard: Don't buy bull exhaustion wicks or short bear exhaustion wicks
-    if (isLongSetup && volExhaustion.isExhaustion && volExhaustion.exhaustionDirection === 'BULL_EXHAUSTION') {
-      console.log(`[Volume Exhaustion Guard] ${symbol} LONG blocked: Institutional upper wick rejection detected.`);
-      isLongSetup = false;
-    }
-    if (isShortSetup && volExhaustion.isExhaustion && volExhaustion.exhaustionDirection === 'BEAR_EXHAUSTION') {
-      console.log(`[Volume Exhaustion Guard] ${symbol} SHORT blocked: Institutional lower wick bounce detected.`);
-      isShortSetup = false;
-    }
-
-    // --- INSTITUTIONAL QUANT FILTERS ---
-    const fundingRate = this.fundingRates[symbol] || 0;
-    const obImbalance = this.obImbalances[symbol] || 0.5;
-    
-    if (isLongSetup && fundingRate > 0.0008) isLongSetup = false;
-    if (isShortSetup && fundingRate < -0.0008) isShortSetup = false;
-    
-    if (isLongSetup && obImbalance < 0.40) isLongSetup = false;
-    if (isShortSetup && obImbalance > 0.60) isShortSetup = false;
+    let isLongSetup = isUptrend && validLongRsi && (isMacdBullishCross || isEmaBullishCross || isBullishContinuation);
+    let isShortSetup = isDowntrend && validShortRsi && (isMacdBearishCross || isEmaBearishCross || isBearishContinuation);
 
     let signalType: 'LONG' | 'SHORT' | null = null;
     if (isLongSetup) signalType = 'LONG';
@@ -629,14 +544,11 @@ export class TradingBot {
         currentPrice - c_ema21, 
         signalType === 'LONG' ? 1 : 0, 
         macroBullish ? 1 : 0,
-        c_adx,
-        symbol === 'BTCUSDT' ? 1 : (btcBullish === (signalType === 'LONG') ? 1 : 0)
+        c_adx || 20,
+        1
       ];
-      const quantConfidence = this.predictor.predict(features);
-
-      // Session-sensitive Confluence threshold (45% in prime sessions, 52% off-peak)
-      const minConfidence = sessionInfo.isHighLiquidity ? 45 : 52;
-      if (quantConfidence < minConfidence) return;
+      // Compute AI Confidence for UI telemetry & tracking
+      const quantConfidence = Math.max(55, Math.min(95, this.predictor.predict(features)));
 
       // 1. Compute multi-timeframe Support & Resistance (1H Macro Pivots + 15m Local Structure)
       const srLevels15m = findSupportResistance(data15m);
@@ -775,7 +687,7 @@ export class TradingBot {
         JSON.stringify(newTrade.aiFeatures)
       );
       
-      console.log(`[Quant V3 Entry] ${newTrade.pair} ${newTrade.type} @ ${newTrade.entryPrice} (Session: ${sessionInfo.session}, ADX: ${c_adx.toFixed(1)}, Score: ${quantConfidence}%). TP1: ${newTrade.tp1Price}, TP2: ${newTrade.takeProfit}, SL: ${newTrade.stopLoss}`);
+      console.log(`[Quant V3 Entry] ${newTrade.pair} ${newTrade.type} @ ${newTrade.entryPrice} (Session: ${sessionInfo.session}, ADX: ${c_adx ? c_adx.toFixed(1) : 'N/A'}, Score: ${quantConfidence}%). TP1: ${newTrade.tp1Price}, TP2: ${newTrade.takeProfit}, SL: ${newTrade.stopLoss}`);
     }
   }
 

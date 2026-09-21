@@ -261,6 +261,15 @@ async function startServer() {
     }
   });
 
+  // Diagnostics endpoints
+  app.get(["/api/system-diagnostics", "/api/diagnostics"], (req, res) => {
+    try {
+      res.json(bot.getDiagnostics());
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   // Endpoints to sync files to Oracle VPS easily
   app.get("/api/download/bundle.tar.gz", (req, res) => {
     const bundlePath = path.join(process.cwd(), 'dist_bundle.tar.gz');
