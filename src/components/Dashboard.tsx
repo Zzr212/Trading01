@@ -478,7 +478,15 @@ export default function Dashboard({ onSelectPair }: Props) {
                   </div>
                   <div className="flex justify-between border-b border-neutral-900 pb-1">
                     <span>Min Risk/Reward:</span>
-                    <span className="font-mono text-white font-bold">1.85 : 1 (do 3.6 : 1)</span>
+                    <span className="font-mono text-white font-bold">2.1 : 1 (do 4.2 : 1)</span>
+                  </div>
+                  <div className="flex justify-between border-b border-neutral-900 pb-1">
+                    <span>Forex Target Floor:</span>
+                    <span className="font-mono text-emerald-400 font-semibold">Min 28–60+ Pips</span>
+                  </div>
+                  <div className="flex justify-between border-b border-neutral-900 pb-1">
+                    <span>Gold Target Floor:</span>
+                    <span className="font-mono text-amber-400 font-semibold">Min $15–$40+ (150–400 Pips)</span>
                   </div>
                   <div className="flex justify-between border-b border-neutral-900 pb-1">
                     <span>TP1 Partial Profit:</span>

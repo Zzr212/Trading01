@@ -627,85 +627,107 @@ export class TradingBot {
       const minConfidence = sessionInfo.isHighLiquidity ? 48 : 58;
       if (quantConfidence < minConfidence) return;
 
-      const srLevels = findSupportResistance(data15m);
-      const vpvr = calculateVPVR(data15m, 50);
-      const topNodes = vpvr.slice(0, 3).map(n => n.price);
+      // 1. Compute multi-timeframe Support & Resistance (1H Macro Pivots + 15m Local Structure)
+      const srLevels15m = findSupportResistance(data15m);
+      const srLevels1h = data1h && data1h.length >= 20 ? findSupportResistance(data1h) : { supports: [], resistances: [] };
       
-      // Spread compensation & Precision calculation based on asset class
+      const allSupports = [...srLevels15m.supports, ...srLevels1h.supports];
+      const allResistances = [...srLevels15m.resistances, ...srLevels1h.resistances];
+
+      const vpvr = calculateVPVR(data15m, 60);
+      const topNodes = vpvr.slice(0, 4).map(n => n.price);
+      
+      // Asset-specific Pip Scaling, Spread Buffer, and Minimum Swing Targets
       let spreadBuffer = 0;
+      let minSwingTarget = 0;
+      let minSlBuffer = c_atr * 1.8;
+      let maxSlBuffer = c_atr * 3.0;
       let decimals = 4;
+
       if (symbol.includes('EUR') || symbol.includes('GBP')) {
-        spreadBuffer = 0.00015; // 1.5 pips spread buffer for Major Forex
+        spreadBuffer = 0.00018; // ~1.8 pips spread buffer
+        minSwingTarget = 0.0028; // Min 28 pips target for Forex (scaling up to 60+ pips)
         decimals = 5;
       } else if (symbol.includes('XAU') || symbol.includes('GOLD')) {
-        spreadBuffer = 0.50; // $0.50 spread buffer for Gold
+        spreadBuffer = 0.60; // $0.60 spread buffer for Gold
+        minSwingTarget = 15.00; // Min $15.00 move for Gold (150 pips, scaling up to $40+)
         decimals = 2;
       } else if (symbol.includes('BTC')) {
-        spreadBuffer = actualEntry * 0.0004; // 0.04% for BTC
+        spreadBuffer = actualEntry * 0.0004;
+        minSwingTarget = actualEntry * 0.016; // Min 1.6% move (~$1,300+ target)
         decimals = 2;
       } else if (symbol.includes('ETH')) {
-        spreadBuffer = actualEntry * 0.0005; // 0.05% for ETH
+        spreadBuffer = actualEntry * 0.0005;
+        minSwingTarget = actualEntry * 0.024; // Min 2.4% move (~$65+ target)
+        decimals = 2;
+      } else if (symbol.includes('SOL')) {
+        spreadBuffer = actualEntry * 0.0008;
+        minSwingTarget = actualEntry * 0.032; // Min 3.2% move (~$4.50+ target)
         decimals = 2;
       } else {
         spreadBuffer = actualEntry * 0.0006;
+        minSwingTarget = actualEntry * 0.020;
         decimals = 4;
       }
 
       let stopLoss = 0;
       let takeProfit = 0;
       
-      // Stop Loss breathing room: 1.5x to 3.2x ATR
+      // Stop Loss breathing room & High-Pip Swing Target Calculation
       if (signalType === 'LONG') {
-        const validSupports = srLevels.supports.filter(s => s < actualEntry);
-        let closestSupport = validSupports.length > 0 ? Math.max(...validSupports) : actualEntry - (c_atr * 2);
+        const validSupports = allSupports.filter(s => s < actualEntry);
+        let closestSupport = validSupports.length > 0 ? Math.max(...validSupports) : actualEntry - minSlBuffer;
         
         let slDistance = actualEntry - closestSupport;
-        slDistance = Math.max(c_atr * 1.5, Math.min(c_atr * 3.2, slDistance));
+        slDistance = Math.max(minSlBuffer, Math.min(maxSlBuffer, slDistance));
         stopLoss = actualEntry - slDistance;
 
-        const validResistances = srLevels.resistances.filter(r => r > actualEntry);
-        let closestResistance = validResistances.length > 0 ? Math.min(...validResistances) : actualEntry + (slDistance * 2);
+        // Find macro resistance target (1H / 15m)
+        const validResistances = allResistances.filter(r => r > actualEntry + (slDistance * 1.8));
+        let closestResistance = validResistances.length > 0 ? Math.min(...validResistances) : actualEntry + (slDistance * 2.5);
         
-        const nodesAbove = topNodes.filter(n => n > actualEntry);
+        const nodesAbove = topNodes.filter(n => n > actualEntry + (slDistance * 1.8));
         if (nodesAbove.length) {
           const pocDistance = Math.min(...nodesAbove) - actualEntry;
-          if (pocDistance > slDistance) closestResistance = Math.min(...nodesAbove);
+          if (pocDistance > slDistance * 1.8) closestResistance = Math.min(...nodesAbove);
         }
         
         let tpDistance = closestResistance - actualEntry;
-        // Minimum R:R of 1.85:1 + spread compensation to guarantee solid net profitability
-        const minTargetDistance = (slDistance * 1.85) + spreadBuffer;
-        tpDistance = Math.max(minTargetDistance, Math.min(slDistance * 3.6, tpDistance));
+        // Institutional R:R Floor: Minimum 2.1 : 1 up to 4.2 : 1 + minSwingTarget check
+        const minTargetDistance = Math.max(slDistance * 2.1 + spreadBuffer, minSwingTarget);
+        tpDistance = Math.max(minTargetDistance, Math.min(slDistance * 4.2, tpDistance));
         takeProfit = actualEntry + tpDistance;
 
       } else {
-        const validResistances = srLevels.resistances.filter(r => r > actualEntry);
-        let closestResistance = validResistances.length > 0 ? Math.min(...validResistances) : actualEntry + (c_atr * 2);
+        const validResistances = allResistances.filter(r => r > actualEntry);
+        let closestResistance = validResistances.length > 0 ? Math.min(...validResistances) : actualEntry + minSlBuffer;
         
         let slDistance = closestResistance - actualEntry;
-        slDistance = Math.max(c_atr * 1.5, Math.min(c_atr * 3.2, slDistance));
+        slDistance = Math.max(minSlBuffer, Math.min(maxSlBuffer, slDistance));
         stopLoss = actualEntry + slDistance;
 
-        const validSupports = srLevels.supports.filter(s => s < actualEntry);
-        let closestSupport = validSupports.length > 0 ? Math.max(...validSupports) : actualEntry - (slDistance * 2);
+        // Find macro support target (1H / 15m)
+        const validSupports = allSupports.filter(s => s < actualEntry - (slDistance * 1.8));
+        let closestSupport = validSupports.length > 0 ? Math.max(...validSupports) : actualEntry - (slDistance * 2.5);
         
-        const nodesBelow = topNodes.filter(n => n < actualEntry);
+        const nodesBelow = topNodes.filter(n => n < actualEntry - (slDistance * 1.8));
         if (nodesBelow.length) {
           const pocDistance = actualEntry - Math.max(...nodesBelow);
-          if (pocDistance > slDistance) closestSupport = Math.max(...nodesBelow);
+          if (pocDistance > slDistance * 1.8) closestSupport = Math.max(...nodesBelow);
         }
 
         let tpDistance = actualEntry - closestSupport;
-        // Minimum R:R of 1.85:1 + spread compensation to guarantee solid net profitability
-        const minTargetDistance = (slDistance * 1.85) + spreadBuffer;
-        tpDistance = Math.max(minTargetDistance, Math.min(slDistance * 3.6, tpDistance));
+        // Institutional R:R Floor: Minimum 2.1 : 1 up to 4.2 : 1 + minSwingTarget check
+        const minTargetDistance = Math.max(slDistance * 2.1 + spreadBuffer, minSwingTarget);
+        tpDistance = Math.max(minTargetDistance, Math.min(slDistance * 4.2, tpDistance));
         takeProfit = actualEntry - tpDistance;
       }
 
-      // Compute TP1 (First partial target: 50% distance to full TP, securing 1R profit)
+      // Compute TP1 (Securing 1.1x Risk profit, moving SL to Break-Even early)
+      const tp1Distance = (takeProfit - actualEntry) * 0.45;
       const tp1Price = signalType === 'LONG'
-        ? actualEntry + ((takeProfit - actualEntry) * 0.5)
-        : actualEntry - ((actualEntry - takeProfit) * 0.5);
+        ? actualEntry + tp1Distance
+        : actualEntry - Math.abs(tp1Distance);
 
       const newTrade: Trade = {
         id: Math.random().toString(36).substr(2, 9),
