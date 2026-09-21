@@ -71,10 +71,10 @@ export class TradePredictor {
         score -= 20; // Heavy penalty for counter-trend
       }
 
-      // 5. ADX Trend Power Filter
-      if (adx >= 28) score += 10;
-      else if (adx >= 22) score += 5;
-      else score -= 15; // Low ADX = chop
+      // 5. ADX Trend Power Filter (Calibrated for 5m intraday data)
+      if (adx >= 25) score += 10;
+      else if (adx >= 18) score += 6;
+      else score -= 10; // Low ADX (<18) = true flat chop
 
       // 6. BTC Master Alignment Filter
       if (btcAligned === 1) {

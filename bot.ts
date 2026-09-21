@@ -512,8 +512,8 @@ export class TradingBot {
     const ema50_15m = calculateEMA(data15m, 50);
     const last_ema21_15m = ema21_15m[ema21_15m.length - 1];
     const last_ema50_15m = ema50_15m[ema50_15m.length - 1];
-    const macroBullish = last_ema21_15m > last_ema50_15m && currentPrice > last_ema21_15m;
-    const macroBearish = last_ema21_15m < last_ema50_15m && currentPrice < last_ema21_15m;
+    const macroBullish = last_ema21_15m > last_ema50_15m && currentPrice >= (last_ema50_15m * 0.999);
+    const macroBearish = last_ema21_15m < last_ema50_15m && currentPrice <= (last_ema50_15m * 1.001);
 
     // 5m Indicators
     const ema9 = calculateEMA(data5m, 9);
@@ -545,8 +545,8 @@ export class TradingBot {
       return;
     }
 
-    const isUptrend = macroBullish && currentPrice > c_vwap && c_pDi > c_mDi;
-    const isDowntrend = macroBearish && currentPrice < c_vwap && c_mDi > c_pDi;
+    const isUptrend = macroBullish && (currentPrice >= (c_vwap * 0.9995) || c_ema9 > c_ema21) && c_pDi >= (c_mDi * 0.95);
+    const isDowntrend = macroBearish && (currentPrice <= (c_vwap * 1.0005) || c_ema9 < c_ema21) && c_mDi >= (c_pDi * 0.95);
     
     // 1. Fresh Crossover triggers
     const isMacdBullishCross = c_macd > 0 && p_macd <= 0;
@@ -609,11 +609,11 @@ export class TradingBot {
     const fundingRate = this.fundingRates[symbol] || 0;
     const obImbalance = this.obImbalances[symbol] || 0.5;
     
-    if (isLongSetup && fundingRate > 0.0005) isLongSetup = false;
-    if (isShortSetup && fundingRate < -0.0005) isShortSetup = false;
+    if (isLongSetup && fundingRate > 0.0008) isLongSetup = false;
+    if (isShortSetup && fundingRate < -0.0008) isShortSetup = false;
     
-    if (isLongSetup && obImbalance < 0.46) isLongSetup = false;
-    if (isShortSetup && obImbalance > 0.54) isShortSetup = false;
+    if (isLongSetup && obImbalance < 0.40) isLongSetup = false;
+    if (isShortSetup && obImbalance > 0.60) isShortSetup = false;
 
     let signalType: 'LONG' | 'SHORT' | null = null;
     if (isLongSetup) signalType = 'LONG';
@@ -634,8 +634,8 @@ export class TradingBot {
       ];
       const quantConfidence = this.predictor.predict(features);
 
-      // Session-sensitive Confluence threshold
-      const minConfidence = sessionInfo.isHighLiquidity ? 48 : 58;
+      // Session-sensitive Confluence threshold (45% in prime sessions, 52% off-peak)
+      const minConfidence = sessionInfo.isHighLiquidity ? 45 : 52;
       if (quantConfidence < minConfidence) return;
 
       // 1. Compute multi-timeframe Support & Resistance (1H Macro Pivots + 15m Local Structure)
