@@ -216,11 +216,9 @@ function TradeItem({ trade, onReview }: { trade: Trade; onReview?: () => void; k
         <div className="flex items-center gap-3">
           {trade.status === 'ACTIVE' && (
             <div className="flex items-center gap-1.5">
-              {trade.tp1Hit && (
-                <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
-                  TP1 Hit (BE Active)
-                </span>
-              )}
+              <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-sky-500/10 text-sky-400 border border-sky-500/20">
+                Fixed SL & Algo TP
+              </span>
               <div className="flex items-center gap-1 text-xs text-orange-400 animate-pulse">
                 <Clock size={12}/> Running
               </div>
@@ -231,11 +229,9 @@ function TradeItem({ trade, onReview }: { trade: Trade; onReview?: () => void; k
               <div className="flex items-center gap-1 text-xs font-semibold text-green-500">
                 <CheckCircle2 size={14}/> Won
               </div>
-              {trade.exitReason && (
-                <span className="text-[9px] text-neutral-400 font-mono">
-                  {trade.exitReason === 'TP1_THEN_BREAKEVEN' ? 'TP1 + Break-Even' : 'TP2 Target'}
-                </span>
-              )}
+              <span className="text-[9px] text-emerald-400 font-mono">
+                {trade.exitReason === 'TAKE_PROFIT' ? 'Algo TP Hit' : (trade.exitReason || 'Take Profit')}
+              </span>
             </div>
           )}
           {trade.status === 'LOST' && (
@@ -243,11 +239,9 @@ function TradeItem({ trade, onReview }: { trade: Trade; onReview?: () => void; k
               <div className="flex items-center gap-1 text-xs font-semibold text-neutral-500">
                 <XCircle size={14}/> Lost
               </div>
-              {trade.exitReason && (
-                <span className="text-[9px] text-rose-400 font-mono">
-                  Stop Loss Hit
-                </span>
-              )}
+              <span className="text-[9px] text-rose-400 font-mono">
+                {trade.exitReason === 'STOP_LOSS' ? 'Fixed SL Hit' : (trade.exitReason || 'Stop Loss')}
+              </span>
             </div>
           )}
           
@@ -269,18 +263,20 @@ function TradeItem({ trade, onReview }: { trade: Trade; onReview?: () => void; k
           <span className="text-neutral-200">${trade.entryPrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
         </div>
         <div className="flex flex-col items-center">
-          <span className="text-[9px] text-neutral-500 font-sans tracking-wide">TP1 (50%)</span>
-          <span className={trade.tp1Hit ? "text-emerald-400 font-bold" : "text-emerald-500/70"}>
-            {trade.tp1Price ? `$${trade.tp1Price.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '--'}
-          </span>
+          <span className="text-[9px] text-neutral-500 font-sans tracking-wide">ALGO TP</span>
+          <span className="text-emerald-400 font-semibold">${trade.takeProfit.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
         </div>
         <div className="flex flex-col items-center">
-          <span className="text-[9px] text-neutral-500 font-sans tracking-wide">TP2 (RUNNER)</span>
-          <span className="text-green-500 font-semibold">${trade.takeProfit.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+          <span className="text-[9px] text-neutral-500 font-sans tracking-wide">FIXED SL</span>
+          <span className="text-rose-400 font-semibold">${trade.stopLoss.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
         </div>
         <div className="flex flex-col items-end">
-          <span className="text-[9px] text-neutral-500 font-sans tracking-wide">STOP LOSS</span>
-          <span className="text-red-400">${trade.stopLoss.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+          <span className="text-[9px] text-neutral-500 font-sans tracking-wide">R:R RATIO</span>
+          <span className="text-sky-400 font-semibold">
+            {trade.entryPrice && trade.stopLoss && trade.takeProfit && Math.abs(trade.entryPrice - trade.stopLoss) > 0
+              ? `${(Math.abs(trade.takeProfit - trade.entryPrice) / Math.abs(trade.entryPrice - trade.stopLoss)).toFixed(2)}:1`
+              : '--'}
+          </span>
         </div>
       </div>
     </motion.div>

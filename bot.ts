@@ -251,62 +251,30 @@ export class TradingBot {
     }
   }
 
-  // Manage Active Trade: Dynamic TP1 (Partial Profit), Break-Even, Trailing Stop, and TP2
+  // Manage Active Trade: Fixed Stop Loss & Algorithmic Single Take Profit (No SL moving, No TP2)
   private manageActiveTrade(symbol: string, currentPrice: number) {
     const activeTrade = this.activeTrades[symbol];
     if (!activeTrade) return;
 
-    // --- 1. DYNAMIC TP1 PARTIAL PROFIT CHECK ---
-    if (!activeTrade.tp1Hit && activeTrade.tp1Price) {
-      const tp1Reached = activeTrade.type === 'LONG' 
-        ? currentPrice >= activeTrade.tp1Price 
-        : currentPrice <= activeTrade.tp1Price;
-
-      if (tp1Reached) {
-        activeTrade.tp1Hit = true;
-        // Lock in Break-Even immediately upon securing TP1
-        activeTrade.stopLoss = activeTrade.entryPrice;
-        
-        try {
-          this.db.prepare("UPDATE trades SET tp1Hit = 1, stopLoss = ? WHERE id = ?")
-            .run(activeTrade.stopLoss, activeTrade.id);
-          console.log(`🎯 [TP1 Secured] ${symbol} ${activeTrade.type}: 50% Profit Locked @ $${currentPrice}! Stop Loss moved to Break-Even ($${activeTrade.entryPrice})`);
-        } catch (e) {
-          console.error("Failed to update TP1 state:", e);
-        }
-      }
-    }
-
-    // --- 2. EXIT CONDITION EVALUATION ---
+    // --- EXIT CONDITION EVALUATION (Fixed SL & Algorithmic TP) ---
     let result: 'WON' | 'LOST' | null = null;
     let exitReason = '';
 
     if (activeTrade.type === 'LONG') {
       if (currentPrice >= activeTrade.takeProfit) {
         result = 'WON';
-        exitReason = 'TP2_FULL_TARGET';
+        exitReason = 'TAKE_PROFIT';
       } else if (currentPrice <= activeTrade.stopLoss) {
-        // If TP1 was already taken, closing at Break-Even is still a profitable outcome overall!
-        if (activeTrade.tp1Hit) {
-          result = 'WON';
-          exitReason = 'TP1_THEN_BREAKEVEN';
-        } else {
-          result = 'LOST';
-          exitReason = 'STOP_LOSS';
-        }
+        result = 'LOST';
+        exitReason = 'STOP_LOSS';
       }
     } else { // SHORT
       if (currentPrice <= activeTrade.takeProfit) {
         result = 'WON';
-        exitReason = 'TP2_FULL_TARGET';
+        exitReason = 'TAKE_PROFIT';
       } else if (currentPrice >= activeTrade.stopLoss) {
-        if (activeTrade.tp1Hit) {
-          result = 'WON';
-          exitReason = 'TP1_THEN_BREAKEVEN';
-        } else {
-          result = 'LOST';
-          exitReason = 'STOP_LOSS';
-        }
+        result = 'LOST';
+        exitReason = 'STOP_LOSS';
       }
     }
     
@@ -341,66 +309,6 @@ export class TradingBot {
 
       this.activeTrades[symbol] = null; 
       return;
-    }
-
-    // --- 3. DYNAMIC BREAK-EVEN & TRAILING STOP (If not already trailing) ---
-    if (activeTrade.type === 'LONG') {
-      const profitDistance = currentPrice - activeTrade.entryPrice;
-      const tpDistance = activeTrade.takeProfit - activeTrade.entryPrice;
-      const initialRisk = activeTrade.entryPrice - activeTrade.stopLoss;
-
-      // Move SL to Break-Even if trade reaches 45% of TP OR +0.7% gain
-      const minBeGain = Math.max(initialRisk * 0.8, activeTrade.entryPrice * 0.007);
-      if ((tpDistance > 0 && profitDistance >= tpDistance * 0.45) || profitDistance >= minBeGain) {
-        if (activeTrade.stopLoss < activeTrade.entryPrice) {
-          activeTrade.stopLoss = activeTrade.entryPrice;
-          this.db.prepare("UPDATE trades SET stopLoss = ? WHERE id = ?").run(activeTrade.stopLoss, activeTrade.id);
-          console.log(`[Break-Even Activated] ${symbol} LONG: Stop Loss moved to Entry @ $${activeTrade.stopLoss}`);
-        }
-      }
-
-      // Trailing Stop if profit reaches 75% of TP: Strictly bounded below current price and below Take-Profit
-      if (tpDistance > 0 && profitDistance >= tpDistance * 0.75) {
-        const rawTrailed = currentPrice - (initialRisk * 0.5);
-        const decimals = (symbol.includes('EUR') || symbol.includes('GBP')) ? 5 : (symbol.includes('BTC') || symbol.includes('ETH') || symbol.includes('XAU') || symbol.includes('GOLD')) ? 2 : 4;
-        // MT5 Guard: SL must be strictly below currentPrice and strictly below takeProfit
-        const maxAllowedLongSL = Math.min(currentPrice * 0.998, activeTrade.takeProfit * 0.998);
-        const validTrailedSL = parseFloat(Math.min(rawTrailed, maxAllowedLongSL).toFixed(decimals));
-        
-        if (validTrailedSL > activeTrade.stopLoss && validTrailedSL < currentPrice) {
-          activeTrade.stopLoss = validTrailedSL;
-          this.db.prepare("UPDATE trades SET stopLoss = ? WHERE id = ?").run(activeTrade.stopLoss, activeTrade.id);
-          console.log(`[Trailing SL Activated] ${symbol} LONG: Stop Loss safely trailed to $${activeTrade.stopLoss}`);
-        }
-      }
-    } else { // SHORT
-      const profitDistance = activeTrade.entryPrice - currentPrice;
-      const tpDistance = activeTrade.entryPrice - activeTrade.takeProfit;
-      const initialRisk = activeTrade.stopLoss - activeTrade.entryPrice;
-
-      const minBeGain = Math.max(initialRisk * 0.8, activeTrade.entryPrice * 0.007);
-      if ((tpDistance > 0 && profitDistance >= tpDistance * 0.45) || profitDistance >= minBeGain) {
-        if (activeTrade.stopLoss > activeTrade.entryPrice) {
-          activeTrade.stopLoss = activeTrade.entryPrice;
-          this.db.prepare("UPDATE trades SET stopLoss = ? WHERE id = ?").run(activeTrade.stopLoss, activeTrade.id);
-          console.log(`[Break-Even Activated] ${symbol} SHORT: Stop Loss moved to Entry @ $${activeTrade.stopLoss}`);
-        }
-      }
-
-      // Trailing Stop if profit reaches 75% of TP: Strictly bounded above current price and above Take-Profit
-      if (tpDistance > 0 && profitDistance >= tpDistance * 0.75) {
-        const rawTrailed = currentPrice + (initialRisk * 0.5);
-        const decimals = (symbol.includes('EUR') || symbol.includes('GBP')) ? 5 : (symbol.includes('BTC') || symbol.includes('ETH') || symbol.includes('XAU') || symbol.includes('GOLD')) ? 2 : 4;
-        // MT5 Guard: SL must be strictly above currentPrice and strictly above takeProfit
-        const minAllowedShortSL = Math.max(currentPrice * 1.002, activeTrade.takeProfit * 1.002);
-        const validTrailedSL = parseFloat(Math.max(rawTrailed, minAllowedShortSL).toFixed(decimals));
-
-        if (validTrailedSL < activeTrade.stopLoss && validTrailedSL > currentPrice) {
-          activeTrade.stopLoss = validTrailedSL;
-          this.db.prepare("UPDATE trades SET stopLoss = ? WHERE id = ?").run(activeTrade.stopLoss, activeTrade.id);
-          console.log(`[Trailing SL Activated] ${symbol} SHORT: Stop Loss safely trailed to $${activeTrade.stopLoss}`);
-        }
-      }
     }
   }
 
@@ -646,20 +554,19 @@ export class TradingBot {
         takeProfit = actualEntry - tpDistance;
       }
 
-      // Compute TP1 (Securing 1.1x Risk profit, moving SL to Break-Even early)
-      const tp1Distance = (takeProfit - actualEntry) * 0.45;
-      const tp1Price = signalType === 'LONG'
-        ? actualEntry + tp1Distance
-        : actualEntry - Math.abs(tp1Distance);
+      // Single Algorithmic Take Profit & Fixed Stop Loss
+      const finalTp = parseFloat(takeProfit.toFixed(decimals));
+      const finalSl = parseFloat(stopLoss.toFixed(decimals));
+      const finalEntry = parseFloat(actualEntry.toFixed(decimals));
 
       const newTrade: Trade = {
         id: Math.random().toString(36).substr(2, 9),
         pair: symbol,
         type: signalType,
-        entryPrice: parseFloat(actualEntry.toFixed(decimals)),
-        takeProfit: parseFloat(takeProfit.toFixed(decimals)),
-        stopLoss: parseFloat(stopLoss.toFixed(decimals)),
-        tp1Price: parseFloat(tp1Price.toFixed(decimals)),
+        entryPrice: finalEntry,
+        takeProfit: finalTp,
+        stopLoss: finalSl,
+        tp1Price: finalTp,
         tp1Hit: false,
         status: 'ACTIVE',
         timestamp: Date.now(),
@@ -687,7 +594,8 @@ export class TradingBot {
         JSON.stringify(newTrade.aiFeatures)
       );
       
-      console.log(`[Quant V3 Entry] ${newTrade.pair} ${newTrade.type} @ ${newTrade.entryPrice} (Session: ${sessionInfo.session}, ADX: ${c_adx ? c_adx.toFixed(1) : 'N/A'}, Score: ${quantConfidence}%). TP1: ${newTrade.tp1Price}, TP2: ${newTrade.takeProfit}, SL: ${newTrade.stopLoss}`);
+      const rrRatio = Math.abs(finalTp - finalEntry) / Math.max(0.00001, Math.abs(finalEntry - finalSl));
+      console.log(`[Quant Trade Opened] ${newTrade.pair} ${newTrade.type} @ ${newTrade.entryPrice} | Fixed SL: ${newTrade.stopLoss} | Algo TP: ${newTrade.takeProfit} (R:R: ${rrRatio.toFixed(2)}:1, Score: ${quantConfidence}%)`);
     }
   }
 
