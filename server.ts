@@ -2,7 +2,6 @@ import express from "express";
 import path from "path";
 import fs from "fs";
 import { DatabaseSync } from "node:sqlite";
-import { createServer as createViteServer } from "vite";
 import rateLimit from "express-rate-limit";
 import { TradingBot } from './bot';
 import { DEFAULT_MT5_CONFIG, generateMql5EACode, MT5Config, MT5Heartbeat } from './src/mt5_bridge';
@@ -598,6 +597,7 @@ async function startServer() {
 
   // Vite middleware for development
   if (process.env.NODE_ENV !== "production") {
+    const { createServer: createViteServer } = await import("vite");
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: "spa",

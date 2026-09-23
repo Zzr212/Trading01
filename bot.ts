@@ -132,6 +132,45 @@ export class TradingBot {
     this.startOrderBookMonitor();
   }
 
+  // Real-time tick ingestion from Vantage MT5 terminal
+  public handleMT5Tick(symbol: string, bid: number, ask: number) {
+    if (!PAIRS.includes(symbol)) return;
+    const currentPrice = (bid + ask) / 2;
+    this.manageActiveTrade(symbol, currentPrice);
+  }
+
+  // Real-time kline ingestion from Vantage MT5 terminal
+  public handleMT5Klines(symbol: string, timeframe: string, klines: any[]) {
+    if (!PAIRS.includes(symbol) || !Array.isArray(klines) || klines.length === 0) return;
+    
+    const formattedKlines: Kline[] = klines.map(k => ({
+      time: typeof k.time === 'number' ? k.time : Date.now(),
+      open: parseFloat(k.open) || 0,
+      high: parseFloat(k.high) || 0,
+      low: parseFloat(k.low) || 0,
+      close: parseFloat(k.close) || 0,
+      volume: parseFloat(k.volume) || 0
+    }));
+
+    if (timeframe === '5m') {
+      this.data5m[symbol] = formattedKlines.slice(-200);
+      const last = formattedKlines[formattedKlines.length - 1];
+      if (last) {
+        this.manageActiveTrade(symbol, last.close);
+        const now = Date.now();
+        const lastEval = this.lastEvaluationTime[symbol] || 0;
+        if (now - lastEval >= 45000) {
+          this.lastEvaluationTime[symbol] = now;
+          this.evaluateNewTrade(symbol, last.close);
+        }
+      }
+    } else if (timeframe === '15m') {
+      this.data15m[symbol] = formattedKlines.slice(-200);
+    } else if (timeframe === '1h') {
+      this.data1h[symbol] = formattedKlines.slice(-200);
+    }
+  }
+
   private startFundingMonitor() {
     // All 6 pairs have active Binance futures funding rate endpoints
     setInterval(async () => {
