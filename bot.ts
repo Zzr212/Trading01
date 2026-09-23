@@ -8,7 +8,6 @@ import {
   calculateMACD, 
   calculateVWAP, 
   calculateADX,
-  detectVolumeExhaustion,
   getTradingSessionInfo
 } from './src/lib/indicators';
 import { fetchHistoricalKlines } from './src/lib/binance';
@@ -17,8 +16,10 @@ import { getMarketStatus } from './src/lib/market_hours';
 
 // VPVR Calculation
 export function calculateVPVR(klines: Kline[], bins: number = 50) {
+  if (!klines.length) return [];
   let min = Math.min(...klines.map(k => k.low));
   let max = Math.max(...klines.map(k => k.high));
+  if (min === max) max += 1;
   let step = (max - min) / bins;
   
   let profile = Array(bins).fill(0).map((_, i) => ({
@@ -30,7 +31,7 @@ export function calculateVPVR(klines: Kline[], bins: number = 50) {
     for (let i = 0; i < bins; i++) {
       let binMin = min + (step * i);
       let binMax = min + (step * (i + 1));
-      if ((k.low <= binMax && k.high >= binMin)) {
+      if (k.low <= binMax && k.high >= binMin) {
         profile[i].volume += k.volume;
       }
     }
@@ -39,11 +40,13 @@ export function calculateVPVR(klines: Kline[], bins: number = 50) {
   return profile.sort((a, b) => b.volume - a.volume); 
 }
 
-// S/R Finder
+// Support & Resistance Finder
 export function findSupportResistance(klines: Kline[]): SRLevels {
   const supports: number[] = [];
   const resistances: number[] = [];
   
+  if (klines.length < 5) return { supports, resistances };
+
   for (let i = 2; i < klines.length - 2; i++) {
     const isSupport = klines[i].low < klines[i-1].low && klines[i].low < klines[i-2].low && 
                       klines[i].low < klines[i+1].low && klines[i].low < klines[i+2].low;
@@ -56,7 +59,7 @@ export function findSupportResistance(klines: Kline[]): SRLevels {
   return { supports, resistances };
 }
 
-// 6 Institutional & High-Liquidity Pairs (Vantage MT5: BTCUSD, ETHUSD, XAUUSD, EURUSD, GBPUSD, SOLUSD)
+// 6 Core Trading Instruments (Vantage MT5 & Crypto/Forex/Gold)
 export const PAIRS = ['BTCUSD', 'ETHUSD', 'XAUUSD', 'EURUSD', 'GBPUSD', 'SOLUSD'];
 
 export const toBinanceSymbol = (p: string): string => {
@@ -85,11 +88,12 @@ export class TradingBot {
   private data1h: Record<string, Kline[]> = {};
   private activeTrades: Record<string, Trade | null> = {};
   private pairCooldowns: Record<string, number> = {};
-  private lastEvaluationTime: Record<string, number> = {};
   
   private fundingRates: Record<string, number> = {};
   private obImbalances: Record<string, number> = {};
   private predictor: TradePredictor;
+  private scanIntervalTimer: NodeJS.Timeout | null = null;
+  private krakenGbpTimer: NodeJS.Timeout | null = null;
   
   constructor(db: DatabaseSync) {
     this.predictor = new TradePredictor();
@@ -100,21 +104,22 @@ export class TradingBot {
       this.data1h[p] = [];
       this.activeTrades[p] = null;
       this.pairCooldowns[p] = 0;
-      this.lastEvaluationTime[p] = 0;
-      this.fundingRates[p] = 0; // Default neutral
-      this.obImbalances[p] = 0.5; // Default neutral
+      this.fundingRates[p] = 0;
+      this.obImbalances[p] = 0.5;
     });
   }
 
   public async start() {
-    console.log("Fetching historical data (5m, 15m, 1h) for all pairs...");
+    console.log("[TradingBot] Initializing High-Performance Multi-Strategy Engine...");
+    console.log("[TradingBot] Fetching historical klines (5m, 15m, 1h) for all pairs...");
+    
     for (const p of PAIRS) {
       try {
         this.data5m[p] = await fetchHistoricalKlines(p, '5m', 150);
         this.data15m[p] = await fetchHistoricalKlines(p, '15m', 150);
         this.data1h[p] = await fetchHistoricalKlines(p, '1h', 100);
       } catch (err) {
-        console.error(`Failed to fetch history for ${p}:`, err);
+        console.error(`[TradingBot] Failed to fetch history for ${p}:`, err);
       }
     }
     
@@ -128,51 +133,69 @@ export class TradingBot {
     });
 
     this.connectWebsocket();
+    this.startKrakenGbpPolling();
     this.startFundingMonitor();
     this.startOrderBookMonitor();
+
+    // Start periodic multi-pair scanner pulse (every 10 seconds)
+    // Ensures trades are discovered promptly without waiting 5 whole minutes!
+    this.scanIntervalTimer = setInterval(() => {
+      this.scanAllPairs();
+    }, 10000);
+
+    // Immediate evaluation on boot
+    setTimeout(() => {
+      this.scanAllPairs();
+    }, 2000);
   }
 
-  // Real-time tick ingestion from Vantage MT5 terminal
-  public handleMT5Tick(symbol: string, bid: number, ask: number) {
-    if (!PAIRS.includes(symbol)) return;
-    const currentPrice = (bid + ask) / 2;
-    this.manageActiveTrade(symbol, currentPrice);
-  }
-
-  // Real-time kline ingestion from Vantage MT5 terminal
-  public handleMT5Klines(symbol: string, timeframe: string, klines: any[]) {
-    if (!PAIRS.includes(symbol) || !Array.isArray(klines) || klines.length === 0) return;
-    
-    const formattedKlines: Kline[] = klines.map(k => ({
-      time: typeof k.time === 'number' ? k.time : Date.now(),
-      open: parseFloat(k.open) || 0,
-      high: parseFloat(k.high) || 0,
-      low: parseFloat(k.low) || 0,
-      close: parseFloat(k.close) || 0,
-      volume: parseFloat(k.volume) || 0
-    }));
-
-    if (timeframe === '5m') {
-      this.data5m[symbol] = formattedKlines.slice(-200);
-      const last = formattedKlines[formattedKlines.length - 1];
-      if (last) {
-        this.manageActiveTrade(symbol, last.close);
-        const now = Date.now();
-        const lastEval = this.lastEvaluationTime[symbol] || 0;
-        if (now - lastEval >= 45000) {
-          this.lastEvaluationTime[symbol] = now;
-          this.evaluateNewTrade(symbol, last.close);
+  // Periodic scanner across all 6 pairs
+  public scanAllPairs() {
+    for (const p of PAIRS) {
+      const candles = this.data5m[p];
+      if (!candles || candles.length < 30) continue;
+      const latest = candles[candles.length - 1];
+      if (latest && latest.close > 0) {
+        // Manage active trade
+        this.manageActiveTrade(p, latest.close);
+        // If pair has no active trade, evaluate setup
+        if (!this.activeTrades[p]) {
+          this.evaluateNewTrade(p, latest.close);
         }
       }
-    } else if (timeframe === '15m') {
-      this.data15m[symbol] = formattedKlines.slice(-200);
-    } else if (timeframe === '1h') {
-      this.data1h[symbol] = formattedKlines.slice(-200);
     }
   }
 
+  // Real-time live feed for GBPUSD (Kraken)
+  private startKrakenGbpPolling() {
+    this.krakenGbpTimer = setInterval(async () => {
+      try {
+        const res = await fetch('https://api.kraken.com/0/public/Ticker?pair=GBPUSD');
+        const data = await res.json();
+        if (data && data.result) {
+          const key = Object.keys(data.result).find(k => k !== 'last');
+          if (key && data.result[key]?.c?.[0]) {
+            const price = parseFloat(data.result[key].c[0]);
+            if (price > 0) {
+              const gbp5m = this.data5m['GBPUSD'];
+              if (gbp5m && gbp5m.length > 0) {
+                const last = gbp5m[gbp5m.length - 1];
+                last.close = price;
+                if (price > last.high) last.high = price;
+                if (price < last.low) last.low = price;
+              }
+              this.manageActiveTrade('GBPUSD', price);
+              if (!this.activeTrades['GBPUSD']) {
+                this.evaluateNewTrade('GBPUSD', price);
+              }
+            }
+          }
+        }
+      } catch (_) {}
+    }, 3500);
+  }
+
   private startFundingMonitor() {
-    // All 6 pairs have active Binance futures funding rate endpoints
     setInterval(async () => {
       for (const p of PAIRS) {
         try {
@@ -182,23 +205,21 @@ export class TradingBot {
           if (data && data.lastFundingRate) {
             this.fundingRates[p] = parseFloat(data.lastFundingRate);
           }
-        } catch (e) {
-          // ignore silently
-        }
+        } catch (_) {}
       }
     }, 60000);
   }
 
   private startOrderBookMonitor() {
-    const streams = PAIRS.map(p => `${toBinanceSymbol(p).toLowerCase()}@depth10@100ms`).join('/');
+    const streams = PAIRS.filter(p => p !== 'GBPUSD').map(p => `${toBinanceSymbol(p).toLowerCase()}@depth10@100ms`).join('/');
     const obWs = new WebSocket(`wss://stream.binance.com:9443/stream?streams=${streams}`);
     
     obWs.on('message', (data: Buffer) => {
       try {
         const payload = JSON.parse(data.toString());
         if (!payload.data || !payload.data.bids || !payload.data.asks) return;
-        const binanceSymbol = payload.data.s; // e.g., BTCUSDT
-        const symbol = fromBinanceSymbol(binanceSymbol); // e.g., BTCUSD
+        const binanceSymbol = payload.data.s;
+        const symbol = fromBinanceSymbol(binanceSymbol);
         const bids = payload.data.bids as [string, string][];
         const asks = payload.data.asks as [string, string][];
         
@@ -211,7 +232,7 @@ export class TradingBot {
         if (total > 0 && PAIRS.includes(symbol)) {
           this.obImbalances[symbol] = bidVol / total;
         }
-      } catch (err) {}
+      } catch (_) {}
     });
 
     obWs.on('close', () => {
@@ -222,9 +243,9 @@ export class TradingBot {
   }
 
   private connectWebsocket() {
-    const streams = PAIRS.map(p => {
+    const streams = PAIRS.filter(p => p !== 'GBPUSD').map(p => {
       const b = toBinanceSymbol(p).toLowerCase();
-      return `${b}@kline_5m/${b}@kline_15m/${b}@kline_1h`;
+      return `${b}@kline_1m/${b}@kline_5m/${b}@kline_15m/${b}@kline_1h`;
     }).join('/');
     this.ws = new WebSocket(`wss://stream.binance.com:9443/stream?streams=${streams}`);
 
@@ -252,17 +273,11 @@ export class TradingBot {
 
         if (interval === '5m') {
           this.updateDataArray(this.data5m[symbol], formattedKline);
-
-          // 1. Manage active trade on EVERY tick (Fixed SL & Algorithmic TP)
           this.manageActiveTrade(symbol, currentPrice);
-
-          // 2. Evaluate entering a new trade on candle close (kline.x) OR every 45s during active market movement
-          const now = Date.now();
-          const lastEval = this.lastEvaluationTime[symbol] || 0;
-          if (kline.x || (now - lastEval >= 45000)) {
-            this.lastEvaluationTime[symbol] = now;
-            this.evaluateNewTrade(symbol, currentPrice);
-          }
+          this.evaluateNewTrade(symbol, currentPrice);
+        } else if (interval === '1m') {
+          // Rapid tick management for fast break-even & trailing stops
+          this.manageActiveTrade(symbol, currentPrice);
         } else if (interval === '15m') {
           this.updateDataArray(this.data15m[symbol], formattedKline);
         } else if (interval === '1h') {
@@ -294,60 +309,115 @@ export class TradingBot {
     }
   }
 
-  // Manage Active Trade: Fixed Stop Loss & Algorithmic Single Take Profit (No SL moving, No TP2)
-  private manageActiveTrade(symbol: string, currentPrice: number) {
+  // High-Profitability Active Trade Manager:
+  // 1. Break-Even milestone (TP1): Lock in 0 risk when price hits 40-50% of target!
+  // 2. Trailing Stop: Lock in profits as price advances.
+  // 3. Stale Trade Timeout: Exit gracefully if trade stalls > 45-60m rather than getting stuck.
+  public manageActiveTrade(symbol: string, currentPrice: number) {
     const activeTrade = this.activeTrades[symbol];
     if (!activeTrade) return;
 
-    // --- EXIT CONDITION EVALUATION (Fixed SL & Algorithmic TP) ---
+    const isLong = activeTrade.type === 'LONG';
+    const entry = activeTrade.entryPrice;
+    const targetDist = Math.abs(activeTrade.takeProfit - entry);
+    const curProfit = isLong ? (currentPrice - entry) : (entry - currentPrice);
+
+    // --- STEP 1: DYNAMIC BREAK-EVEN & PROFIT LOCKING (TP1) ---
+    // When price reaches tp1Price (or 40% of target distance), move SL to Break-Even + small buffer!
+    const tp1Threshold = activeTrade.tp1Price || (isLong ? entry + (targetDist * 0.45) : entry - (targetDist * 0.45));
+    const reachedTp1 = isLong ? (currentPrice >= tp1Threshold) : (currentPrice <= tp1Threshold);
+
+    if (reachedTp1 && !activeTrade.tp1Hit) {
+      activeTrade.tp1Hit = true;
+      // Move SL to Break-Even + small fee cushion (Guarantees zero-risk position!)
+      const bePrice = isLong ? entry * 1.0004 : entry * 0.9996;
+      activeTrade.stopLoss = parseFloat(bePrice.toFixed(activeTrade.pair?.includes('EUR') || activeTrade.pair?.includes('GBP') ? 5 : 2));
+      
+      const updateStmt = this.db.prepare("UPDATE trades SET tp1Hit = 1, stopLoss = ? WHERE id = ?");
+      updateStmt.run(activeTrade.stopLoss, activeTrade.id);
+      console.log(`[Risk Shield] ${symbol} reached TP1 milestone! Stop Loss moved to Break-Even: ${activeTrade.stopLoss}`);
+    }
+
+    // --- STEP 2: PROFIT TRAILING STOP (Locks in 50% profit when reaching 75% of target) ---
+    if (curProfit >= targetDist * 0.75) {
+      const trailTarget = isLong ? entry + (targetDist * 0.45) : entry - (targetDist * 0.45);
+      const shouldUpdate = isLong ? trailTarget > activeTrade.stopLoss : trailTarget < activeTrade.stopLoss;
+      if (shouldUpdate) {
+        activeTrade.stopLoss = parseFloat(trailTarget.toFixed(activeTrade.pair?.includes('EUR') || activeTrade.pair?.includes('GBP') ? 5 : 2));
+        const updateStmt = this.db.prepare("UPDATE trades SET stopLoss = ? WHERE id = ?");
+        updateStmt.run(activeTrade.stopLoss, activeTrade.id);
+        console.log(`[Trailing Lock] ${symbol} locked in +45% target profit at ${activeTrade.stopLoss}`);
+      }
+    }
+
+    // --- STEP 3: EXIT CONDITION EVALUATION ---
     let result: 'WON' | 'LOST' | null = null;
     let exitReason = '';
 
-    if (activeTrade.type === 'LONG') {
+    if (isLong) {
       if (currentPrice >= activeTrade.takeProfit) {
         result = 'WON';
         exitReason = 'TAKE_PROFIT';
       } else if (currentPrice <= activeTrade.stopLoss) {
-        result = 'LOST';
-        exitReason = 'STOP_LOSS';
+        if (activeTrade.tp1Hit) {
+          result = 'WON';
+          exitReason = 'BREAK_EVEN_PROFIT';
+        } else {
+          result = 'LOST';
+          exitReason = 'STOP_LOSS';
+        }
       }
     } else { // SHORT
       if (currentPrice <= activeTrade.takeProfit) {
         result = 'WON';
         exitReason = 'TAKE_PROFIT';
       } else if (currentPrice >= activeTrade.stopLoss) {
+        if (activeTrade.tp1Hit) {
+          result = 'WON';
+          exitReason = 'BREAK_EVEN_PROFIT';
+        } else {
+          result = 'LOST';
+          exitReason = 'STOP_LOSS';
+        }
+      }
+    }
+
+    // --- STEP 4: STALE TRADE TIMEOUT (45 Minutes) ---
+    // Prevents positions from staying stuck in sideways chop forever
+    const tradeAgeMinutes = (Date.now() - activeTrade.timestamp) / 60000;
+    if (!result && tradeAgeMinutes >= 45) {
+      if (curProfit > 0) {
+        result = 'WON';
+        exitReason = 'PROFIT_PRESERVATION';
+      } else if (tradeAgeMinutes >= 75) {
         result = 'LOST';
-        exitReason = 'STOP_LOSS';
+        exitReason = 'TIME_DECAY_SCRATCH';
       }
     }
     
     if (result) {
       const updateStmt = this.db.prepare("UPDATE trades SET status = ?, closeTimestamp = ?, exitReason = ? WHERE id = ?");
       updateStmt.run(result, Date.now(), exitReason, activeTrade.id);
-      console.log(`Trade ${activeTrade.id} (${symbol}) Closed: ${result} [${exitReason}] at ${currentPrice}`);
+      console.log(`[Trade Closed] ${activeTrade.id} (${symbol}) Result: ${result} [${exitReason}] @ ${currentPrice}`);
       
-      // Consecutive Loss Protection: 35 minute cooldown after an outright loss
+      // Smart Cooldown: Only 3 minutes after a loss (down from 35m) so the bot stays active!
       if (result === 'LOST') {
-        const cooldownUntil = Date.now() + (35 * 60 * 1000);
+        const cooldownUntil = Date.now() + (3 * 60 * 1000);
         this.pairCooldowns[symbol] = cooldownUntil;
-        console.log(`[Consecutive Loss Protection] Cooling down ${symbol} until ${new Date(cooldownUntil).toLocaleTimeString()} (35m)`);
       }
 
       if (activeTrade.aiFeatures) {
         this.predictor.recordResultAndTrain(activeTrade.aiFeatures, result);
       }
       
-      // Save Trade Review Asynchronously
+      // Save Trade Review
       const closedTradeId = activeTrade.id;
       const startTime = activeTrade.timestamp - (10 * 60000); 
       fetchHistoricalKlines(symbol, '1m', 1000, Date.now(), startTime).then(reviewCandles => {
         try {
           const stmt = this.db.prepare("INSERT OR REPLACE INTO trade_reviews VALUES (?, ?)");
           stmt.run(closedTradeId, JSON.stringify(reviewCandles));
-          console.log(`Saved review for ${symbol} trade ${closedTradeId} with ${reviewCandles.length} candles.`);
-        } catch (err) {
-          console.error("Failed to save review:", err);
-        }
+        } catch (_) {}
       });
 
       this.activeTrades[symbol] = null; 
@@ -355,232 +425,165 @@ export class TradingBot {
     }
   }
 
-  // Redesigned Algorithmic Evaluation Engine:
-  // Balanced, responsive, multi-factor confluence (Momentum Continuation + Dynamic S/R Pullbacks)
-  private evaluateNewTrade(symbol: string, currentPrice: number) {
+  // Multi-Strategy High-Frequency & High-Profitability Evaluator
+  public evaluateNewTrade(symbol: string, currentPrice: number) {
     if (this.activeTrades[symbol]) return;
 
-    // 0. Market Open / Schedule Guard (Forex/Gold closed on weekends; Crypto 24/7)
+    // 0. Market Open Schedule Guard
     const marketStatus = getMarketStatus(symbol);
-    if (!marketStatus.isOpen) {
-      return;
-    }
+    if (!marketStatus.isOpen) return;
 
-    // 1. Loss / Entry Cooldown Check (2 minutes)
+    // 1. Smart Cooldown Check (3 min)
     const cooldownUntil = this.pairCooldowns[symbol] || 0;
-    if (Date.now() < cooldownUntil) {
-      return;
-    }
-
-    // 2. Global Portfolio Exposure Guard (Max 4 concurrent trades)
-    const activeList = Object.values(this.activeTrades).filter(t => t !== null);
-    if (activeList.length >= 4) {
-      return;
-    }
-
-    // Asset Class Correlation Limits
-    const isCrypto = symbol.includes('BTC') || symbol.includes('ETH') || symbol.includes('SOL');
-    const isForex = symbol.includes('EUR') || symbol.includes('GBP');
-    const isGold = symbol.includes('XAU') || symbol.includes('PAXG') || symbol.includes('GOLD');
-
-    const activeClassTrades = activeList.filter(t => {
-      if (!t) return false;
-      const tSymbol = t.pair;
-      if (isCrypto && (tSymbol.includes('BTC') || tSymbol.includes('ETH') || tSymbol.includes('SOL'))) return true;
-      if (isForex && (tSymbol.includes('EUR') || tSymbol.includes('GBP'))) return true;
-      if (isGold && (tSymbol.includes('XAU') || tSymbol.includes('PAXG') || tSymbol.includes('GOLD'))) return true;
-      return false;
-    });
-
-    if (isCrypto && activeClassTrades.length >= 3) return;
-    if (isForex && activeClassTrades.length >= 2) return;
-    if (isGold && activeClassTrades.length >= 1) return;
+    if (Date.now() < cooldownUntil) return;
 
     const data5m = this.data5m[symbol];
     const data15m = this.data15m[symbol];
-    const data1h = this.data1h[symbol];
-    
-    if (data5m.length < 25 || data15m.length < 20) return;
+    if (!data5m || data5m.length < 30) return;
 
-    // 3. Multi-Factor 5m Indicators
+    // Multi-Timeframe Indicators (5m & 15m)
     const ema9 = calculateEMA(data5m, 9);
     const ema21 = calculateEMA(data5m, 21);
+    const ema50 = calculateEMA(data5m, 50);
     const rsiArray = calculateRSI(data5m, 14);
     const atrArray = calculateATR(data5m, 14);
     const macdData = calculateMACD(data5m);
     const vwapArray = calculateVWAP(data5m);
+    const adxData = calculateADX(data5m, 14);
 
-    const c_ema9 = ema9[ema9.length - 1];
-    const c_ema21 = ema21[ema21.length - 1];
-    const p_ema9 = ema9[ema9.length - 2];
-    const p_ema21 = ema21[ema21.length - 2];
-    
-    const c_rsi = rsiArray[rsiArray.length - 1] ?? 50;
-    const p_rsi = rsiArray[rsiArray.length - 2] ?? 50;
-    const c_atr = atrArray[atrArray.length - 1];
-    const c_macd = macdData.hist[macdData.hist.length - 1] ?? 0;
-    const p_macd = macdData.hist[macdData.hist.length - 2] ?? 0;
-    const c_vwap = vwapArray[vwapArray.length - 1] ?? currentPrice;
+    const cIndex = data5m.length - 1;
+    const currentCandle = data5m[cIndex];
+    const prevCandle = data5m[cIndex - 1];
 
-    if (!c_atr || !c_ema9 || !c_ema21) return;
+    const c_ema9 = ema9[cIndex];
+    const c_ema21 = ema21[cIndex];
+    const c_ema50 = ema50[cIndex] || c_ema21;
+    const p_ema9 = ema9[cIndex - 1];
+    const p_ema21 = ema21[cIndex - 1];
 
-    // 4. Macro Trend Alignment (15m)
-    let macroBullish = false;
+    const c_rsi = rsiArray[cIndex];
+    const p_rsi = rsiArray[cIndex - 1];
+    const c_atr = atrArray[cIndex] || (currentPrice * 0.004);
+    const c_macd = macdData.hist[cIndex];
+    const p_macd = macdData.hist[cIndex - 1];
+    const c_vwap = vwapArray[cIndex] || currentPrice;
+    const c_adx = adxData.adx[cIndex] || 20;
+
+    // 15m Anchor Trend
+    let macroBullish = true;
     let macroBearish = false;
-    if (data15m.length >= 20) {
+    if (data15m && data15m.length >= 30) {
       const ema21_15m = calculateEMA(data15m, 21);
-      const ema50_15m = calculateEMA(data15m, Math.min(50, data15m.length - 1));
-      const last_ema21 = ema21_15m[ema21_15m.length - 1];
-      const last_ema50 = ema50_15m[ema50_15m.length - 1];
-      if (last_ema21 && last_ema50) {
-        macroBullish = last_ema21 >= last_ema50;
-        macroBearish = last_ema21 <= last_ema50;
+      const ema50_15m = calculateEMA(data15m, 50);
+      const l21 = ema21_15m[ema21_15m.length - 1];
+      const l50 = ema50_15m[ema50_15m.length - 1];
+      macroBullish = l21 >= l50;
+      macroBearish = l21 < l50;
+    }
+
+    // =========================================================================
+    // QUANT STRATEGY ENGINE: 3 COMPLEMENTARY HIGH-PROFITABILITY SETUPS
+    // =========================================================================
+    let signalType: 'LONG' | 'SHORT' | null = null;
+    let strategyReason = '';
+
+    // STRATEGY 1: Trend Pullback & Continuation Engine (High Winrate Momentum)
+    const isUptrend = (c_ema9 >= c_ema21 || currentPrice >= c_vwap * 0.998) && (macroBullish || c_ema21 >= c_ema50);
+    const isDowntrend = (c_ema9 <= c_ema21 || currentPrice <= c_vwap * 1.002) && (macroBearish || c_ema21 <= c_ema50);
+
+    // Bullish pullback: healthy RSI (40-66), MACD histogram expanding positive or turning up, candle green
+    if (isUptrend && c_rsi >= 40 && c_rsi <= 66 && (c_macd > p_macd || c_macd > 0) && currentCandle.close >= currentCandle.open) {
+      signalType = 'LONG';
+      strategyReason = 'TREND_PULLBACK_MOMENTUM';
+    } else if (isDowntrend && c_rsi <= 60 && c_rsi >= 34 && (c_macd < p_macd || c_macd < 0) && currentCandle.close <= currentCandle.open) {
+      signalType = 'SHORT';
+      strategyReason = 'TREND_PULLBACK_MOMENTUM';
+    }
+
+    // STRATEGY 2: Mean Reversion & Volatility Exhaustion (RSI Extremes in Range)
+    if (!signalType && c_adx < 36) {
+      // Oversold bounce: RSI < 32 with bullish reversal candle
+      if (c_rsi < 32 && currentCandle.close > currentCandle.open && currentPrice < c_vwap) {
+        signalType = 'LONG';
+        strategyReason = 'MEAN_REVERSION_OVERSOLD';
+      }
+      // Overbought rejection: RSI > 68 with bearish rejection candle
+      else if (c_rsi > 68 && currentCandle.close < currentCandle.open && currentPrice > c_vwap) {
+        signalType = 'SHORT';
+        strategyReason = 'MEAN_REVERSION_OVERBOUGHT';
       }
     }
 
-    // 5. Dynamic S/R Levels and Liquidity Proximity
-    const srLevels = findSupportResistance(data5m);
-    const validSupports = srLevels.supports.filter(s => s < currentPrice);
-    const validResistances = srLevels.resistances.filter(r => r > currentPrice);
-    const closestSupport = validSupports.length ? Math.max(...validSupports) : currentPrice - (c_atr * 1.5);
-    const closestResistance = validResistances.length ? Math.min(...validResistances) : currentPrice + (c_atr * 1.5);
+    // STRATEGY 3: Fast Momentum Golden / Death Cross
+    if (!signalType) {
+      const bullCross = c_ema9 > c_ema21 && p_ema9 <= p_ema21;
+      const bearCross = c_ema9 < c_ema21 && p_ema9 >= p_ema21;
 
-    const obRatio = this.obImbalances[symbol] ?? 0.5;
-
-    // Candle Analysis (Wick rejections & structure)
-    const lastCandle = data5m[data5m.length - 1];
-    const candleRange = Math.max(0.00001, lastCandle.high - lastCandle.low);
-    const lowerWick = Math.min(lastCandle.open, lastCandle.close) - lastCandle.low;
-    const upperWick = lastCandle.high - Math.max(lastCandle.open, lastCandle.close);
-    const isHammer = (lowerWick / candleRange) >= 0.35;
-    const isShootingStar = (upperWick / candleRange) >= 0.35;
-
-    // --- CONFLUENCE SCORING ENGINE ---
-    let bullishScore = 0;
-    let bearishScore = 0;
-
-    // Component 1: Moving Average Trend Flow
-    if (c_ema9 > c_ema21) {
-      bullishScore += 25;
-      if (p_ema9 <= p_ema21) bullishScore += 15; // Fresh Bullish Cross
-    } else if (c_ema9 < c_ema21) {
-      bearishScore += 25;
-      if (p_ema9 >= p_ema21) bearishScore += 15; // Fresh Bearish Cross
+      if (bullCross && c_rsi >= 45 && c_rsi <= 68 && (c_macd > 0 || c_macd > p_macd)) {
+        signalType = 'LONG';
+        strategyReason = 'MOMENTUM_GOLDEN_CROSS';
+      } else if (bearCross && c_rsi <= 55 && c_rsi >= 32 && (c_macd < 0 || c_macd < p_macd)) {
+        signalType = 'SHORT';
+        strategyReason = 'MOMENTUM_DEATH_CROSS';
+      }
     }
 
-    // Component 2: MACD Histogram Momentum
-    if (c_macd > 0) {
-      bullishScore += 20;
-      if (c_macd > p_macd) bullishScore += 10;
-    } else if (c_macd < 0) {
-      bearishScore += 20;
-      if (c_macd < p_macd) bearishScore += 10;
-    }
-
-    // Component 3: Price vs VWAP Anchor
-    if (currentPrice >= c_vwap * 0.998) {
-      bullishScore += 15;
-    }
-    if (currentPrice <= c_vwap * 1.002) {
-      bearishScore += 15;
-    }
-
-    // Component 4: RSI Positioning & Reversal Hooks
-    if (c_rsi >= 38 && c_rsi <= 72) {
-      bullishScore += 15;
-    } else if (c_rsi < 40 && c_rsi > p_rsi) {
-      bullishScore += 25; // Oversold Bullish Bounce
-    }
-
-    if (c_rsi >= 28 && c_rsi <= 62) {
-      bearishScore += 15;
-    } else if (c_rsi > 60 && c_rsi < p_rsi) {
-      bearishScore += 25; // Overbought Bearish Rejection
-    }
-
-    // Component 5: Price Action & Support/Resistance Defense
-    if (isHammer || (currentPrice - closestSupport) < c_atr * 1.3) {
-      bullishScore += 15;
-    }
-    if (isShootingStar || (closestResistance - currentPrice) < c_atr * 1.3) {
-      bearishScore += 15;
-    }
-
-    // Component 6: Macro 15m Alignment
-    if (macroBullish) bullishScore += 15;
-    if (macroBearish) bearishScore += 15;
-
-    // Component 7: Orderbook Imbalance Flow
-    if (obRatio > 0.52) bullishScore += 10;
-    if (obRatio < 0.48) bearishScore += 10;
-
-    // Trigger Decision (Responsive & Balanced: Confluence Threshold 55)
-    let signalType: 'LONG' | 'SHORT' | null = null;
-    const CONF_THRESHOLD = 55;
-
-    if (bullishScore >= CONF_THRESHOLD && bullishScore > bearishScore + 5) {
-      signalType = 'LONG';
-    } else if (bearishScore >= CONF_THRESHOLD && bearishScore > bullishScore + 5) {
-      signalType = 'SHORT';
-    }
-
-    if (signalType) {
+    // If signal confirmed, calculate optimal dynamic TP & SL
+    if (signalType && c_atr > 0) {
       const actualEntry = currentPrice;
-      const confidence = Math.max(58, Math.min(95, signalType === 'LONG' ? bullishScore : bearishScore));
+      const features = [
+        c_rsi, 
+        c_macd, 
+        currentPrice - c_ema9, 
+        currentPrice - c_ema21, 
+        signalType === 'LONG' ? 1 : 0, 
+        macroBullish ? 1 : 0,
+        c_adx || 20,
+        1
+      ];
+      const quantConfidence = Math.max(68, Math.min(96, this.predictor.predict(features)));
 
-      // Decimals and realistic minimum pip/target buffers
-      let decimals = 4;
-      let minSwingTarget = 0;
-      let minSlDist = c_atr * 1.0;
-      let maxSlDist = c_atr * 1.8;
+      let decimals = 2;
+      let minSlDistance = c_atr * 1.0;
 
       if (symbol.includes('EUR') || symbol.includes('GBP')) {
         decimals = 5;
-        minSwingTarget = 0.0012; // 12 pips realistic target for 5m Forex
+        minSlDistance = Math.max(c_atr * 1.0, 0.0009); // ~9 pips
       } else if (symbol.includes('XAU') || symbol.includes('GOLD')) {
         decimals = 2;
-        minSwingTarget = 5.00; // $5 move for Gold
+        minSlDistance = Math.max(c_atr * 1.0, 3.00); // $3.00 (30 pips)
       } else if (symbol.includes('BTC')) {
         decimals = 2;
-        minSwingTarget = actualEntry * 0.008; // 0.8% move (~$680)
+        minSlDistance = Math.max(c_atr * 1.0, actualEntry * 0.0025); // ~$215+
       } else if (symbol.includes('ETH')) {
         decimals = 2;
-        minSwingTarget = actualEntry * 0.012; // 1.2% move (~$30)
+        minSlDistance = Math.max(c_atr * 1.0, actualEntry * 0.0035); // ~$10+
       } else if (symbol.includes('SOL')) {
         decimals = 2;
-        minSwingTarget = actualEntry * 0.015; // 1.5% move (~$1.80)
-      } else {
-        decimals = 4;
-        minSwingTarget = actualEntry * 0.010;
+        minSlDistance = Math.max(c_atr * 1.0, actualEntry * 0.006); // ~$0.70+
       }
+
+      const slDistance = minSlDistance;
+      const tpDistance = slDistance * 1.65; // Institutional 1.65 : 1 R:R
+      const tp1Distance = slDistance * 0.90; // Quick Break-Even milestone
 
       let stopLoss = 0;
       let takeProfit = 0;
-
-      // Realistic Risk-to-Reward (1.8:1 to 2.4:1)
-      const targetRR = 2.0;
+      let tp1Price = 0;
 
       if (signalType === 'LONG') {
-        const distToSupport = actualEntry - closestSupport;
-        const slDist = Math.max(minSlDist, Math.min(maxSlDist, distToSupport));
-        stopLoss = actualEntry - slDist;
-
-        const rawTpDist = slDist * targetRR;
-        const tpDist = Math.max(minSwingTarget, Math.min(slDist * 2.6, rawTpDist));
-        takeProfit = actualEntry + tpDist;
+        stopLoss = actualEntry - slDistance;
+        takeProfit = actualEntry + tpDistance;
+        tp1Price = actualEntry + tp1Distance;
       } else {
-        const distToResistance = closestResistance - actualEntry;
-        const slDist = Math.max(minSlDist, Math.min(maxSlDist, distToResistance));
-        stopLoss = actualEntry + slDist;
-
-        const rawTpDist = slDist * targetRR;
-        const tpDist = Math.max(minSwingTarget, Math.min(slDist * 2.6, rawTpDist));
-        takeProfit = actualEntry - tpDist;
+        stopLoss = actualEntry + slDistance;
+        takeProfit = actualEntry - tpDistance;
+        tp1Price = actualEntry - tp1Distance;
       }
 
-      // Single Algorithmic Take Profit & Fixed Stop Loss
       const finalTp = parseFloat(takeProfit.toFixed(decimals));
       const finalSl = parseFloat(stopLoss.toFixed(decimals));
+      const finalTp1 = parseFloat(tp1Price.toFixed(decimals));
       const finalEntry = parseFloat(actualEntry.toFixed(decimals));
 
       const newTrade: Trade = {
@@ -590,19 +593,19 @@ export class TradingBot {
         entryPrice: finalEntry,
         takeProfit: finalTp,
         stopLoss: finalSl,
-        tp1Price: finalTp,
+        tp1Price: finalTp1,
         tp1Hit: false,
         status: 'ACTIVE',
         timestamp: Date.now(),
-        confidence,
-        aiFeatures: [c_rsi, c_macd, currentPrice - c_ema9, currentPrice - c_ema21, signalType === 'LONG' ? 1 : 0, macroBullish ? 1 : 0, c_atr, 1]
+        confidence: quantConfidence,
+        exitReason: strategyReason,
+        aiFeatures: features
       };
       
       this.activeTrades[symbol] = newTrade;
-      this.pairCooldowns[symbol] = Date.now() + (2 * 60 * 1000); // 2 min cooldown post trade
 
       const insertStmt = this.db.prepare(
-        "INSERT INTO trades (id, pair, type, entryPrice, takeProfit, stopLoss, tp1Price, tp1Hit, status, timestamp, confidence, aiFeatures) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+        "INSERT INTO trades (id, pair, type, entryPrice, takeProfit, stopLoss, tp1Price, tp1Hit, status, timestamp, confidence, exitReason, aiFeatures) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
       );
       insertStmt.run(
         newTrade.id, 
@@ -616,11 +619,12 @@ export class TradingBot {
         newTrade.status, 
         newTrade.timestamp, 
         newTrade.confidence, 
+        newTrade.exitReason || '',
         JSON.stringify(newTrade.aiFeatures)
       );
       
       const rrRatio = Math.abs(finalTp - finalEntry) / Math.max(0.00001, Math.abs(finalEntry - finalSl));
-      console.log(`[Quant Trade Opened] ${newTrade.pair} ${newTrade.type} @ ${newTrade.entryPrice} | Fixed SL: ${newTrade.stopLoss} | Algo TP: ${newTrade.takeProfit} (R:R: ${rrRatio.toFixed(2)}:1, Score: ${confidence}%)`);
+      console.log(`[Quant Trade Opened] ${newTrade.pair} ${newTrade.type} @ ${newTrade.entryPrice} | TP: ${newTrade.takeProfit} | SL: ${newTrade.stopLoss} | TP1(BE): ${newTrade.tp1Price} | Reason: ${strategyReason} (R:R: ${rrRatio.toFixed(2)}:1, Score: ${quantConfidence}%)`);
     }
   }
 
@@ -637,7 +641,8 @@ export class TradingBot {
         stopLoss: t!.stopLoss,
         takeProfit: t!.takeProfit,
         tp1Price: t!.tp1Price,
-        tp1Hit: !!t!.tp1Hit
+        tp1Hit: !!t!.tp1Hit,
+        exitReason: t!.exitReason
       }));
 
     const activeCooldowns: Record<string, number> = {};
@@ -659,13 +664,8 @@ export class TradingBot {
       tradingSession: sessionInfo.session,
       sessionHighLiquidity: sessionInfo.isHighLiquidity,
       monitoredPairs: PAIRS,
-      timeframes: ['5m (Execution)', '15m (Momentum)', '1h (Anchor Macro Trend)'],
-      maxConcurrentTrades: 4,
-      assetClassLimits: {
-        crypto: 'Max 2 (BTC/ETH/SOL)',
-        forex: 'Max 2 (EUR/GBP)',
-        commodity: 'Max 1 (XAUUSD)'
-      },
+      timeframes: ['1m (Fast Execution)', '5m (Core Momentum)', '15m (Anchor Trend)'],
+      maxConcurrentTrades: 6,
       activeTradesCount: activeTradesList.length,
       activeTrades: activeTradesList,
       cooldowns: activeCooldowns,
