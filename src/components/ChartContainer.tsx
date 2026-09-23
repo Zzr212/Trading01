@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Kline, Timeframe, Trade, SRLevels } from '../types';
 import { fetchHistoricalKlines } from '../lib/binance';
-import { calculateEMA, calculateRSI, calculateMACD, calculateATR, calculateVWAP, findSupportResistance } from '../lib/indicators';
+import { calculateEMA, calculateRSI, calculateMACD, calculateATR, findSupportResistance } from '../lib/indicators';
 import CandlestickChart from './CandlestickChart';
 import { ChevronDown, Home } from 'lucide-react';
 const TIMEFRAMES: Timeframe[] = ['1m', '5m', '15m', '30m', '1h', '1d', '1w', '1M'];
@@ -23,49 +23,17 @@ export default function ChartContainer({ symbol, onBack, activeTrade, onPriceUpd
     const rsiArray = calculateRSI(data, 14);
     const atrArray = calculateATR(data, 14);
     const macdData = calculateMACD(data);
-    const vwapArray = calculateVWAP(data);
     
-    return data.map((d, i) => {
-      const e9 = ema9[i];
-      const e21 = ema21[i];
-      const pe9 = i > 0 ? ema9[i - 1] : null;
-      const pe21 = i > 0 ? ema21[i - 1] : null;
-      const macdHist = macdData.hist[i];
-      const pMacdHist = i > 0 ? macdData.hist[i - 1] : null;
-      const rsi = rsiArray[i];
-      const atr = atrArray[i] ?? 0;
-      const vwap = vwapArray[i] ?? d.close;
-
-      let algoSignal: 'LONG' | 'SHORT' | null = null;
-      if (e9 !== null && e21 !== null && pe9 !== null && pe21 !== null && macdHist !== null && rsi !== null) {
-        const isBullishCross = (e9 > e21 && pe9 <= pe21) || (macdHist > 0 && (pMacdHist ?? 0) <= 0);
-        const isBullishBounce = d.low <= vwap && d.close > vwap && rsi >= 38 && rsi <= 68;
-
-        const isBearishCross = (e9 < e21 && pe9 >= pe21) || (macdHist < 0 && (pMacdHist ?? 0) >= 0);
-        const isBearishRejection = d.high >= vwap && d.close < vwap && rsi >= 32 && rsi <= 62;
-
-        if (isBullishCross || isBullishBounce) {
-          algoSignal = 'LONG';
-        } else if (isBearishCross || isBearishRejection) {
-          algoSignal = 'SHORT';
-        }
-      }
-
-      return {
-        ...d,
-        ema9: e9,
-        ema21: e21,
-        rsi,
-        atr,
-        macd: macdData.macd[i],
-        macdSignal: macdData.signal[i],
-        macdHist,
-        vwap,
-        vwapUpper: vwap + (atr * 1.5),
-        vwapLower: vwap - (atr * 1.5),
-        algoSignal
-      };
-    });
+    return data.map((d, i) => ({
+      ...d,
+      ema9: ema9[i],
+      ema21: ema21[i],
+      rsi: rsiArray[i],
+      atr: atrArray[i],
+      macd: macdData.macd[i],
+      macdSignal: macdData.signal[i],
+      macdHist: macdData.hist[i]
+    }));
   }, [data]);
   const [timeframe, setTimeframe] = useState<Timeframe>('1m');
   const [isLoading, setIsLoading] = useState(true);

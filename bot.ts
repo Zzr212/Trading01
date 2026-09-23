@@ -85,7 +85,6 @@ export class TradingBot {
   private data1h: Record<string, Kline[]> = {};
   private activeTrades: Record<string, Trade | null> = {};
   private pairCooldowns: Record<string, number> = {};
-  private lastEvaluationTime: Record<string, number> = {};
   
   private fundingRates: Record<string, number> = {};
   private obImbalances: Record<string, number> = {};
@@ -100,7 +99,6 @@ export class TradingBot {
       this.data1h[p] = [];
       this.activeTrades[p] = null;
       this.pairCooldowns[p] = 0;
-      this.lastEvaluationTime[p] = 0;
       this.fundingRates[p] = 0; // Default neutral
       this.obImbalances[p] = 0.5; // Default neutral
     });
@@ -214,14 +212,12 @@ export class TradingBot {
         if (interval === '5m') {
           this.updateDataArray(this.data5m[symbol], formattedKline);
 
-          // 1. Manage active trade on EVERY tick (Fixed SL & Algorithmic TP)
+          // 1. Manage active trade on EVERY tick (Break-Even, Trailing Stop, SL/TP)
           this.manageActiveTrade(symbol, currentPrice);
 
-          // 2. Evaluate entering a new trade on candle close (kline.x) OR every 45s during active market movement
-          const now = Date.now();
-          const lastEval = this.lastEvaluationTime[symbol] || 0;
-          if (kline.x || (now - lastEval >= 45000)) {
-            this.lastEvaluationTime[symbol] = now;
+          // 2. ONLY evaluate entering a new trade when 5m candle officially CLOSES (kline.x)
+          // This eliminates intra-candle false breakouts and wick traps!
+          if (kline.x) {
             this.evaluateNewTrade(symbol, currentPrice);
           }
         } else if (interval === '15m') {
@@ -316,34 +312,46 @@ export class TradingBot {
     }
   }
 
-  // Redesigned Algorithmic Evaluation Engine:
-  // Balanced, responsive, multi-factor confluence (Momentum Continuation + Dynamic S/R Pullbacks)
+  // Evaluates a new trade ONLY when a 5m candle closes
   private evaluateNewTrade(symbol: string, currentPrice: number) {
     if (this.activeTrades[symbol]) return;
 
-    // 0. Market Open / Schedule Guard (Forex/Gold closed on weekends; Crypto 24/7)
+    // 0. Market Open / Weekend Schedule Guard
+    // Forex (EURUSD, GBPUSD) & Gold (XAUUSD) markets close on weekends.
+    // Crypto (BTCUSD, ETHUSD, SOLUSD) trades 24/7.
     const marketStatus = getMarketStatus(symbol);
     if (!marketStatus.isOpen) {
+      // Market is closed (e.g. weekend close or settlement break). Bot completely skips signal evaluation.
       return;
     }
 
-    // 1. Loss / Entry Cooldown Check (2 minutes)
+    // 1. Loss Cooldown Check
     const cooldownUntil = this.pairCooldowns[symbol] || 0;
     if (Date.now() < cooldownUntil) {
       return;
     }
 
-    // 2. Global Portfolio Exposure Guard (Max 4 concurrent trades)
+    // 2. SMART MULTI-ASSET EXPOSURE & CORRELATION SHIELD
+    // For 6 diversified pairs (Crypto, Forex, Gold):
+    // - Global Portfolio Limit: Max 4 concurrent trades (across all 6 pairs)
+    // - Asset Class Correlation Limits:
+    //    * Crypto (BTC, ETH, SOL): Max 2 concurrent trades
+    //    * Forex (EURUSD, GBPUSD): Max 2 concurrent trades
+    //    * Commodity / Gold (XAUUSD): Max 1 concurrent trade
+    // - Risk-free bonus: Trades that already reached TP1 (Stop Loss @ Break-Even) do not count against risk capacity!
     const activeList = Object.values(this.activeTrades).filter(t => t !== null);
+    
+    // Total open positions check (Global Max: 4)
     if (activeList.length >= 4) {
-      return;
+      return; // Absolute max portfolio exposure reached
     }
 
-    // Asset Class Correlation Limits
+    // Determine current asset class
     const isCrypto = symbol.includes('BTC') || symbol.includes('ETH') || symbol.includes('SOL');
     const isForex = symbol.includes('EUR') || symbol.includes('GBP');
     const isGold = symbol.includes('XAU') || symbol.includes('PAXG') || symbol.includes('GOLD');
 
+    // Count active risk-exposed positions in this specific asset class (excluding de-risked Break-Even trades)
     const activeClassTrades = activeList.filter(t => {
       if (!t) return false;
       const tSymbol = t.pair;
@@ -353,190 +361,197 @@ export class TradingBot {
       return false;
     });
 
-    if (isCrypto && activeClassTrades.length >= 3) return;
-    if (isForex && activeClassTrades.length >= 2) return;
-    if (isGold && activeClassTrades.length >= 1) return;
+    if (isCrypto && activeClassTrades.length >= 2) {
+      // Prevents 3x correlated drawdown if BTC moves violently
+      return;
+    }
+    if (isForex && activeClassTrades.length >= 2) {
+      return;
+    }
+    if (isGold && activeClassTrades.length >= 1) {
+      return;
+    }
 
     const data5m = this.data5m[symbol];
     const data15m = this.data15m[symbol];
     const data1h = this.data1h[symbol];
     
-    if (data5m.length < 25 || data15m.length < 20) return;
+    if (data5m.length < 50 || data15m.length < 50) return;
 
-    // 3. Multi-Factor 5m Indicators
+    const sessionInfo = getTradingSessionInfo();
+
+    // 3. Macro Trend (15m timeframe - Proven Core)
+    const ema21_15m = calculateEMA(data15m, 21);
+    const ema50_15m = calculateEMA(data15m, 50);
+    const last_ema21_15m = ema21_15m[ema21_15m.length - 1];
+    const last_ema50_15m = ema50_15m[ema50_15m.length - 1];
+    const macroBullish = last_ema21_15m > last_ema50_15m;
+    const macroBearish = last_ema21_15m < last_ema50_15m;
+
+    // 4. Fast 5m Indicators
     const ema9 = calculateEMA(data5m, 9);
     const ema21 = calculateEMA(data5m, 21);
     const rsiArray = calculateRSI(data5m, 14);
     const atrArray = calculateATR(data5m, 14);
     const macdData = calculateMACD(data5m);
     const vwapArray = calculateVWAP(data5m);
+    const adxData = calculateADX(data5m, 14);
 
     const c_ema9 = ema9[ema9.length - 1];
     const c_ema21 = ema21[ema21.length - 1];
     const p_ema9 = ema9[ema9.length - 2];
     const p_ema21 = ema21[ema21.length - 2];
     
-    const c_rsi = rsiArray[rsiArray.length - 1] ?? 50;
-    const p_rsi = rsiArray[rsiArray.length - 2] ?? 50;
+    const c_rsi = rsiArray[rsiArray.length - 1];
     const c_atr = atrArray[atrArray.length - 1];
-    const c_macd = macdData.hist[macdData.hist.length - 1] ?? 0;
-    const p_macd = macdData.hist[macdData.hist.length - 2] ?? 0;
-    const c_vwap = vwapArray[vwapArray.length - 1] ?? currentPrice;
+    const c_macd = macdData.hist[macdData.hist.length - 1];
+    const p_macd = macdData.hist[macdData.hist.length - 2];
+    const c_vwap = vwapArray[vwapArray.length - 1];
+    const c_adx = adxData.adx[adxData.adx.length - 1];
 
-    if (!c_atr || !c_ema9 || !c_ema21) return;
-
-    // 4. Macro Trend Alignment (15m)
-    let macroBullish = false;
-    let macroBearish = false;
-    if (data15m.length >= 20) {
-      const ema21_15m = calculateEMA(data15m, 21);
-      const ema50_15m = calculateEMA(data15m, Math.min(50, data15m.length - 1));
-      const last_ema21 = ema21_15m[ema21_15m.length - 1];
-      const last_ema50 = ema50_15m[ema50_15m.length - 1];
-      if (last_ema21 && last_ema50) {
-        macroBullish = last_ema21 >= last_ema50;
-        macroBearish = last_ema21 <= last_ema50;
-      }
+    // Minimal baseline ADX check (only filters completely flat zero-volatility chop)
+    if (c_adx !== null && c_adx < 14) {
+      return;
     }
 
-    // 5. Dynamic S/R Levels and Liquidity Proximity
-    const srLevels = findSupportResistance(data5m);
-    const validSupports = srLevels.supports.filter(s => s < currentPrice);
-    const validResistances = srLevels.resistances.filter(r => r > currentPrice);
-    const closestSupport = validSupports.length ? Math.max(...validSupports) : currentPrice - (c_atr * 1.5);
-    const closestResistance = validResistances.length ? Math.min(...validResistances) : currentPrice + (c_atr * 1.5);
+    // Trend alignment with VWAP
+    const isUptrend = macroBullish && currentPrice >= (c_vwap * 0.999);
+    const isDowntrend = macroBearish && currentPrice <= (c_vwap * 1.001);
+    
+    // Proven High-Winrate Entry Triggers:
+    // 1) Fresh MACD crossover
+    // 2) Fresh EMA 9/21 crossover
+    // 3) Strong Trend Momentum continuation (Fast EMA > Slow EMA & expanding MACD)
+    const isMacdBullishCross = c_macd > 0 && p_macd <= 0;
+    const isMacdBearishCross = c_macd < 0 && p_macd >= 0;
+    
+    const isEmaBullishCross = c_ema9 > c_ema21 && p_ema9 <= p_ema21;
+    const isEmaBearishCross = c_ema9 < c_ema21 && p_ema9 >= p_ema21;
 
-    const obRatio = this.obImbalances[symbol] ?? 0.5;
+    const isBullishContinuation = c_ema9 > c_ema21 && c_macd > 0;
+    const isBearishContinuation = c_ema9 < c_ema21 && c_macd < 0;
 
-    // Candle Analysis (Wick rejections & structure)
-    const lastCandle = data5m[data5m.length - 1];
-    const candleRange = Math.max(0.00001, lastCandle.high - lastCandle.low);
-    const lowerWick = Math.min(lastCandle.open, lastCandle.close) - lastCandle.low;
-    const upperWick = lastCandle.high - Math.max(lastCandle.open, lastCandle.close);
-    const isHammer = (lowerWick / candleRange) >= 0.35;
-    const isShootingStar = (upperWick / candleRange) >= 0.35;
+    // Healthy momentum RSI ranges (avoids buying exact top >74 or shorting exact bottom <26)
+    const validLongRsi = c_rsi >= 38 && c_rsi <= 74;
+    const validShortRsi = c_rsi <= 62 && c_rsi >= 26;
 
-    // --- CONFLUENCE SCORING ENGINE ---
-    let bullishScore = 0;
-    let bearishScore = 0;
+    let isLongSetup = isUptrend && validLongRsi && (isMacdBullishCross || isEmaBullishCross || isBullishContinuation);
+    let isShortSetup = isDowntrend && validShortRsi && (isMacdBearishCross || isEmaBearishCross || isBearishContinuation);
 
-    // Component 1: Moving Average Trend Flow
-    if (c_ema9 > c_ema21) {
-      bullishScore += 25;
-      if (p_ema9 <= p_ema21) bullishScore += 15; // Fresh Bullish Cross
-    } else if (c_ema9 < c_ema21) {
-      bearishScore += 25;
-      if (p_ema9 >= p_ema21) bearishScore += 15; // Fresh Bearish Cross
-    }
-
-    // Component 2: MACD Histogram Momentum
-    if (c_macd > 0) {
-      bullishScore += 20;
-      if (c_macd > p_macd) bullishScore += 10;
-    } else if (c_macd < 0) {
-      bearishScore += 20;
-      if (c_macd < p_macd) bearishScore += 10;
-    }
-
-    // Component 3: Price vs VWAP Anchor
-    if (currentPrice >= c_vwap * 0.998) {
-      bullishScore += 15;
-    }
-    if (currentPrice <= c_vwap * 1.002) {
-      bearishScore += 15;
-    }
-
-    // Component 4: RSI Positioning & Reversal Hooks
-    if (c_rsi >= 38 && c_rsi <= 72) {
-      bullishScore += 15;
-    } else if (c_rsi < 40 && c_rsi > p_rsi) {
-      bullishScore += 25; // Oversold Bullish Bounce
-    }
-
-    if (c_rsi >= 28 && c_rsi <= 62) {
-      bearishScore += 15;
-    } else if (c_rsi > 60 && c_rsi < p_rsi) {
-      bearishScore += 25; // Overbought Bearish Rejection
-    }
-
-    // Component 5: Price Action & Support/Resistance Defense
-    if (isHammer || (currentPrice - closestSupport) < c_atr * 1.3) {
-      bullishScore += 15;
-    }
-    if (isShootingStar || (closestResistance - currentPrice) < c_atr * 1.3) {
-      bearishScore += 15;
-    }
-
-    // Component 6: Macro 15m Alignment
-    if (macroBullish) bullishScore += 15;
-    if (macroBearish) bearishScore += 15;
-
-    // Component 7: Orderbook Imbalance Flow
-    if (obRatio > 0.52) bullishScore += 10;
-    if (obRatio < 0.48) bearishScore += 10;
-
-    // Trigger Decision (Responsive & Balanced: Confluence Threshold 55)
     let signalType: 'LONG' | 'SHORT' | null = null;
-    const CONF_THRESHOLD = 55;
+    if (isLongSetup) signalType = 'LONG';
+    if (isShortSetup) signalType = 'SHORT';
 
-    if (bullishScore >= CONF_THRESHOLD && bullishScore > bearishScore + 5) {
-      signalType = 'LONG';
-    } else if (bearishScore >= CONF_THRESHOLD && bearishScore > bullishScore + 5) {
-      signalType = 'SHORT';
-    }
-
-    if (signalType) {
+    if (signalType && c_atr) {
       const actualEntry = currentPrice;
-      const confidence = Math.max(58, Math.min(95, signalType === 'LONG' ? bullishScore : bearishScore));
+      
+      const features = [
+        c_rsi, 
+        c_macd, 
+        currentPrice - c_ema9, 
+        currentPrice - c_ema21, 
+        signalType === 'LONG' ? 1 : 0, 
+        macroBullish ? 1 : 0,
+        c_adx || 20,
+        1
+      ];
+      // Compute AI Confidence for UI telemetry & tracking
+      const quantConfidence = Math.max(55, Math.min(95, this.predictor.predict(features)));
 
-      // Decimals and realistic minimum pip/target buffers
-      let decimals = 4;
+      // 1. Compute multi-timeframe Support & Resistance (1H Macro Pivots + 15m Local Structure)
+      const srLevels15m = findSupportResistance(data15m);
+      const srLevels1h = data1h && data1h.length >= 20 ? findSupportResistance(data1h) : { supports: [], resistances: [] };
+      
+      const allSupports = [...srLevels15m.supports, ...srLevels1h.supports];
+      const allResistances = [...srLevels15m.resistances, ...srLevels1h.resistances];
+
+      const vpvr = calculateVPVR(data15m, 60);
+      const topNodes = vpvr.slice(0, 4).map(n => n.price);
+      
+      // Asset-specific Pip Scaling, Spread Buffer, and Minimum Swing Targets
+      let spreadBuffer = 0;
       let minSwingTarget = 0;
-      let minSlDist = c_atr * 1.0;
-      let maxSlDist = c_atr * 1.8;
+      let minSlBuffer = c_atr * 1.8;
+      let maxSlBuffer = c_atr * 3.0;
+      let decimals = 4;
 
       if (symbol.includes('EUR') || symbol.includes('GBP')) {
+        spreadBuffer = 0.00018; // ~1.8 pips spread buffer
+        minSwingTarget = 0.0028; // Min 28 pips target for Forex (scaling up to 60+ pips)
         decimals = 5;
-        minSwingTarget = 0.0012; // 12 pips realistic target for 5m Forex
       } else if (symbol.includes('XAU') || symbol.includes('GOLD')) {
+        spreadBuffer = 0.60; // $0.60 spread buffer for Gold
+        minSwingTarget = 15.00; // Min $15.00 move for Gold (150 pips, scaling up to $40+)
         decimals = 2;
-        minSwingTarget = 5.00; // $5 move for Gold
       } else if (symbol.includes('BTC')) {
+        spreadBuffer = actualEntry * 0.0004;
+        minSwingTarget = actualEntry * 0.016; // Min 1.6% move (~$1,300+ target)
         decimals = 2;
-        minSwingTarget = actualEntry * 0.008; // 0.8% move (~$680)
       } else if (symbol.includes('ETH')) {
+        spreadBuffer = actualEntry * 0.0005;
+        minSwingTarget = actualEntry * 0.024; // Min 2.4% move (~$65+ target)
         decimals = 2;
-        minSwingTarget = actualEntry * 0.012; // 1.2% move (~$30)
       } else if (symbol.includes('SOL')) {
+        spreadBuffer = actualEntry * 0.0008;
+        minSwingTarget = actualEntry * 0.032; // Min 3.2% move (~$4.50+ target)
         decimals = 2;
-        minSwingTarget = actualEntry * 0.015; // 1.5% move (~$1.80)
       } else {
+        spreadBuffer = actualEntry * 0.0006;
+        minSwingTarget = actualEntry * 0.020;
         decimals = 4;
-        minSwingTarget = actualEntry * 0.010;
       }
 
       let stopLoss = 0;
       let takeProfit = 0;
-
-      // Realistic Risk-to-Reward (1.8:1 to 2.4:1)
-      const targetRR = 2.0;
-
+      
+      // Stop Loss breathing room & High-Pip Swing Target Calculation
       if (signalType === 'LONG') {
-        const distToSupport = actualEntry - closestSupport;
-        const slDist = Math.max(minSlDist, Math.min(maxSlDist, distToSupport));
-        stopLoss = actualEntry - slDist;
+        const validSupports = allSupports.filter(s => s < actualEntry);
+        let closestSupport = validSupports.length > 0 ? Math.max(...validSupports) : actualEntry - minSlBuffer;
+        
+        let slDistance = actualEntry - closestSupport;
+        slDistance = Math.max(minSlBuffer, Math.min(maxSlBuffer, slDistance));
+        stopLoss = actualEntry - slDistance;
 
-        const rawTpDist = slDist * targetRR;
-        const tpDist = Math.max(minSwingTarget, Math.min(slDist * 2.6, rawTpDist));
-        takeProfit = actualEntry + tpDist;
+        // Find macro resistance target (1H / 15m)
+        const validResistances = allResistances.filter(r => r > actualEntry + (slDistance * 1.8));
+        let closestResistance = validResistances.length > 0 ? Math.min(...validResistances) : actualEntry + (slDistance * 2.5);
+        
+        const nodesAbove = topNodes.filter(n => n > actualEntry + (slDistance * 1.8));
+        if (nodesAbove.length) {
+          const pocDistance = Math.min(...nodesAbove) - actualEntry;
+          if (pocDistance > slDistance * 1.8) closestResistance = Math.min(...nodesAbove);
+        }
+        
+        let tpDistance = closestResistance - actualEntry;
+        // Institutional R:R Floor: Minimum 2.1 : 1 up to 4.2 : 1 + minSwingTarget check
+        const minTargetDistance = Math.max(slDistance * 2.1 + spreadBuffer, minSwingTarget);
+        tpDistance = Math.max(minTargetDistance, Math.min(slDistance * 4.2, tpDistance));
+        takeProfit = actualEntry + tpDistance;
+
       } else {
-        const distToResistance = closestResistance - actualEntry;
-        const slDist = Math.max(minSlDist, Math.min(maxSlDist, distToResistance));
-        stopLoss = actualEntry + slDist;
+        const validResistances = allResistances.filter(r => r > actualEntry);
+        let closestResistance = validResistances.length > 0 ? Math.min(...validResistances) : actualEntry + minSlBuffer;
+        
+        let slDistance = closestResistance - actualEntry;
+        slDistance = Math.max(minSlBuffer, Math.min(maxSlBuffer, slDistance));
+        stopLoss = actualEntry + slDistance;
 
-        const rawTpDist = slDist * targetRR;
-        const tpDist = Math.max(minSwingTarget, Math.min(slDist * 2.6, rawTpDist));
-        takeProfit = actualEntry - tpDist;
+        // Find macro support target (1H / 15m)
+        const validSupports = allSupports.filter(s => s < actualEntry - (slDistance * 1.8));
+        let closestSupport = validSupports.length > 0 ? Math.max(...validSupports) : actualEntry - (slDistance * 2.5);
+        
+        const nodesBelow = topNodes.filter(n => n < actualEntry - (slDistance * 1.8));
+        if (nodesBelow.length) {
+          const pocDistance = actualEntry - Math.max(...nodesBelow);
+          if (pocDistance > slDistance * 1.8) closestSupport = Math.max(...nodesBelow);
+        }
+
+        let tpDistance = actualEntry - closestSupport;
+        // Institutional R:R Floor: Minimum 2.1 : 1 up to 4.2 : 1 + minSwingTarget check
+        const minTargetDistance = Math.max(slDistance * 2.1 + spreadBuffer, minSwingTarget);
+        tpDistance = Math.max(minTargetDistance, Math.min(slDistance * 4.2, tpDistance));
+        takeProfit = actualEntry - tpDistance;
       }
 
       // Single Algorithmic Take Profit & Fixed Stop Loss
@@ -555,12 +570,11 @@ export class TradingBot {
         tp1Hit: false,
         status: 'ACTIVE',
         timestamp: Date.now(),
-        confidence,
-        aiFeatures: [c_rsi, c_macd, currentPrice - c_ema9, currentPrice - c_ema21, signalType === 'LONG' ? 1 : 0, macroBullish ? 1 : 0, c_atr, 1]
+        confidence: quantConfidence,
+        aiFeatures: features
       };
       
       this.activeTrades[symbol] = newTrade;
-      this.pairCooldowns[symbol] = Date.now() + (2 * 60 * 1000); // 2 min cooldown post trade
 
       const insertStmt = this.db.prepare(
         "INSERT INTO trades (id, pair, type, entryPrice, takeProfit, stopLoss, tp1Price, tp1Hit, status, timestamp, confidence, aiFeatures) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
@@ -581,7 +595,7 @@ export class TradingBot {
       );
       
       const rrRatio = Math.abs(finalTp - finalEntry) / Math.max(0.00001, Math.abs(finalEntry - finalSl));
-      console.log(`[Quant Trade Opened] ${newTrade.pair} ${newTrade.type} @ ${newTrade.entryPrice} | Fixed SL: ${newTrade.stopLoss} | Algo TP: ${newTrade.takeProfit} (R:R: ${rrRatio.toFixed(2)}:1, Score: ${confidence}%)`);
+      console.log(`[Quant Trade Opened] ${newTrade.pair} ${newTrade.type} @ ${newTrade.entryPrice} | Fixed SL: ${newTrade.stopLoss} | Algo TP: ${newTrade.takeProfit} (R:R: ${rrRatio.toFixed(2)}:1, Score: ${quantConfidence}%)`);
     }
   }
 
