@@ -9,13 +9,13 @@ import subprocess
 import urllib.request
 import tarfile
 
-LIVE_URL = "https://ais-dev-eqdesi5vmp6bbenkfms5bi-89105905321.europe-west2.run.app"
+LIVE_TUNNEL_URL = "https://marvel-epinions-conditional-suspected.trycloudflare.com"
 
 print("="*60)
 print(">>> AŽURIRANJE AI TRADER MT5 BRIDGE NA ORACLE VPS <<<")
 print("="*60)
 
-bundle_url = f"{LIVE_URL}/api/download/bundle.tar.gz"
+bundle_url = f"{LIVE_TUNNEL_URL}/api/download/bundle.tar.gz"
 archive_name = "bundle.tar.gz"
 
 try:
