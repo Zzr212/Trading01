@@ -1,6 +1,5 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { Kline, Trade } from '../types';
-import { findSupportResistance } from '../lib/indicators';
 
 interface ChartProps {
   symbol?: string;
@@ -209,131 +208,7 @@ export default function CandlestickChart({ symbol = 'BTCUSDT', data, timeframe, 
       ctx.globalAlpha = 1.0;
     }
 
-    // 2. Dynamic Algorithmic Support & Resistance Liquidity Levels (Zero text, subtle dashed rays)
-    const sr = findSupportResistance(data);
-    const visibleMinY = paddingY;
-    const visibleMaxY = height - paddingY;
-
-    // Draw Resistance Levels (Subtle red tint with anchor dot)
-    sr.resistances.slice(0, 2).forEach(price => {
-      const y = getY(price);
-      if (y >= visibleMinY && y <= visibleMaxY) {
-        ctx.strokeStyle = 'rgba(244, 63, 94, 0.28)';
-        ctx.lineWidth = 1;
-        ctx.setLineDash([4, 6]);
-        ctx.beginPath();
-        ctx.moveTo(0, y);
-        ctx.lineTo(width - 55, y);
-        ctx.stroke();
-
-        ctx.fillStyle = 'rgba(244, 63, 94, 0.45)';
-        ctx.beginPath();
-        ctx.arc(width - 55, y, 2.5, 0, Math.PI * 2);
-        ctx.fill();
-      }
-    });
-
-    // Draw Support Levels (Subtle green tint with anchor dot)
-    sr.supports.slice(0, 2).forEach(price => {
-      const y = getY(price);
-      if (y >= visibleMinY && y <= visibleMaxY) {
-        ctx.strokeStyle = 'rgba(16, 185, 129, 0.28)';
-        ctx.lineWidth = 1;
-        ctx.setLineDash([4, 6]);
-        ctx.beginPath();
-        ctx.moveTo(0, y);
-        ctx.lineTo(width - 55, y);
-        ctx.stroke();
-
-        ctx.fillStyle = 'rgba(16, 185, 129, 0.45)';
-        ctx.beginPath();
-        ctx.arc(width - 55, y, 2.5, 0, Math.PI * 2);
-        ctx.fill();
-      }
-    });
-    ctx.setLineDash([]);
-
-    // 3. Dynamic Algorithmic VWAP & Volatility Boundary Envelopes (Zero text)
-    // Central VWAP Anchor
-    ctx.strokeStyle = 'rgba(56, 189, 248, 0.28)';
-    ctx.lineWidth = 1;
-    ctx.setLineDash([3, 4]);
-    ctx.beginPath();
-    let isVwapFirst = true;
-    visibleData.forEach((d, i) => {
-      if (d.vwap) {
-        const actualIndex = leftIndex + i;
-        const distanceFromRightEdge = (data.length - 1 - actualIndex) - offset;
-        const x = width - (distanceFromRightEdge * candleTotalWidth) - candleTotalWidth / 2;
-        const y = getY(d.vwap);
-        if (isVwapFirst) { ctx.moveTo(x, y); isVwapFirst = false; }
-        else ctx.lineTo(x, y);
-      }
-    });
-    ctx.stroke();
-
-    // Upper Volatility Envelope (VWAP + 1.5 ATR)
-    ctx.strokeStyle = 'rgba(148, 163, 184, 0.16)';
-    ctx.lineWidth = 0.8;
-    ctx.setLineDash([2, 4]);
-    ctx.beginPath();
-    let isUpFirst = true;
-    visibleData.forEach((d, i) => {
-      if (d.vwapUpper) {
-        const actualIndex = leftIndex + i;
-        const distanceFromRightEdge = (data.length - 1 - actualIndex) - offset;
-        const x = width - (distanceFromRightEdge * candleTotalWidth) - candleTotalWidth / 2;
-        const y = getY(d.vwapUpper);
-        if (isUpFirst) { ctx.moveTo(x, y); isUpFirst = false; }
-        else ctx.lineTo(x, y);
-      }
-    });
-    ctx.stroke();
-
-    // Lower Volatility Envelope (VWAP - 1.5 ATR)
-    ctx.beginPath();
-    let isLowFirst = true;
-    visibleData.forEach((d, i) => {
-      if (d.vwapLower) {
-        const actualIndex = leftIndex + i;
-        const distanceFromRightEdge = (data.length - 1 - actualIndex) - offset;
-        const x = width - (distanceFromRightEdge * candleTotalWidth) - candleTotalWidth / 2;
-        const y = getY(d.vwapLower);
-        if (isLowFirst) { ctx.moveTo(x, y); isLowFirst = false; }
-        else ctx.lineTo(x, y);
-      }
-    });
-    ctx.stroke();
-    ctx.setLineDash([]);
-
-    // 4. Dynamic Algorithmic Trend Cloud / Ribbon between EMA9 & EMA21 (Zero text)
-    for (let i = 0; i < visibleData.length - 1; i++) {
-      const d1 = visibleData[i];
-      const d2 = visibleData[i + 1];
-      if (d1.ema9 && d1.ema21 && d2.ema9 && d2.ema21) {
-        const idx1 = leftIndex + i;
-        const idx2 = leftIndex + i + 1;
-        const x1 = width - ((data.length - 1 - idx1) - offset) * candleTotalWidth - candleTotalWidth / 2;
-        const x2 = width - ((data.length - 1 - idx2) - offset) * candleTotalWidth - candleTotalWidth / 2;
-        
-        const y1_9 = getY(d1.ema9);
-        const y1_21 = getY(d1.ema21);
-        const y2_9 = getY(d2.ema9);
-        const y2_21 = getY(d2.ema21);
-
-        const isBullish = (d1.ema9 + d2.ema9) >= (d1.ema21 + d2.ema21);
-        ctx.fillStyle = isBullish ? 'rgba(16, 185, 129, 0.07)' : 'rgba(244, 63, 94, 0.07)';
-        ctx.beginPath();
-        ctx.moveTo(x1, y1_9);
-        ctx.lineTo(x2, y2_9);
-        ctx.lineTo(x2, y2_21);
-        ctx.lineTo(x1, y1_21);
-        ctx.closePath();
-        ctx.fill();
-      }
-    }
-
-    // 5. Draw Candles
+    // 3. Draw Candles
     visibleData.forEach((d, i) => {
       const actualIndex = leftIndex + i;
       const distanceFromRightEdge = (data.length - 1 - actualIndex) - offset;
@@ -363,99 +238,40 @@ export default function CandlestickChart({ symbol = 'BTCUSDT', data, timeframe, 
       ctx.fillRect(x - candleWidth / 2, bodyTop, candleWidth, bodyHeight);
     });
 
-    // 6. Sleek Contours for Fast & Slow Algorithmic EMAs (Zero text)
-    ctx.lineWidth = 1.3;
+    // 4. Draw EMAs
+    ctx.lineWidth = 1.5;
     
-    // EMA9 (Fast Trend Line - Sky Blue)
-    ctx.strokeStyle = 'rgba(56, 189, 248, 0.65)';
+    // EMA9 (Blue)
+    ctx.strokeStyle = '#3b82f6';
     ctx.beginPath();
-    let isFirstE9 = true;
+    let isFirst = true;
     visibleData.forEach((d, i) => {
       if (d.ema9) {
         const actualIndex = leftIndex + i;
         const distanceFromRightEdge = (data.length - 1 - actualIndex) - offset;
         const x = width - (distanceFromRightEdge * candleTotalWidth) - candleTotalWidth / 2;
         const y = getY(d.ema9);
-        if (isFirstE9) { ctx.moveTo(x, y); isFirstE9 = false; }
+        if (isFirst) { ctx.moveTo(x, y); isFirst = false; }
         else ctx.lineTo(x, y);
       }
     });
     ctx.stroke();
 
-    // EMA21 (Baseline Trend Line - Amber)
-    ctx.strokeStyle = 'rgba(251, 146, 60, 0.65)';
+    // EMA21 (Orange)
+    ctx.strokeStyle = '#f97316';
     ctx.beginPath();
-    let isFirstE21 = true;
+    isFirst = true;
     visibleData.forEach((d, i) => {
       if (d.ema21) {
         const actualIndex = leftIndex + i;
         const distanceFromRightEdge = (data.length - 1 - actualIndex) - offset;
         const x = width - (distanceFromRightEdge * candleTotalWidth) - candleTotalWidth / 2;
         const y = getY(d.ema21);
-        if (isFirstE21) { ctx.moveTo(x, y); isFirstE21 = false; }
+        if (isFirst) { ctx.moveTo(x, y); isFirst = false; }
         else ctx.lineTo(x, y);
       }
     });
     ctx.stroke();
-
-    // 7. Algorithmic Setup Trigger Radar / Markers (Micro-dots, strictly ZERO text)
-    visibleData.forEach((d, i) => {
-      const actualIndex = leftIndex + i;
-      const distanceFromRightEdge = (data.length - 1 - actualIndex) - offset;
-      const x = width - (distanceFromRightEdge * candleTotalWidth) - candleTotalWidth / 2;
-      const isLatestCandle = actualIndex === data.length - 1;
-
-      if (d.algoSignal === 'LONG') {
-        const lowY = getY(d.low);
-        const dotY = lowY + 7;
-        
-        // Outer subtle halo
-        ctx.fillStyle = 'rgba(20, 184, 166, 0.22)';
-        ctx.beginPath();
-        ctx.arc(x, dotY, 5, 0, Math.PI * 2);
-        ctx.fill();
-
-        // Inner glowing core dot
-        ctx.fillStyle = '#14b8a6';
-        ctx.beginPath();
-        ctx.arc(x, dotY, 2.5, 0, Math.PI * 2);
-        ctx.fill();
-      } else if (d.algoSignal === 'SHORT') {
-        const highY = getY(d.high);
-        const dotY = highY - 7;
-        
-        // Outer subtle halo
-        ctx.fillStyle = 'rgba(244, 63, 94, 0.22)';
-        ctx.beginPath();
-        ctx.arc(x, dotY, 5, 0, Math.PI * 2);
-        ctx.fill();
-
-        // Inner glowing core dot
-        ctx.fillStyle = '#f43f5e';
-        ctx.beginPath();
-        ctx.arc(x, dotY, 2.5, 0, Math.PI * 2);
-        ctx.fill();
-      }
-
-      // Real-time scan beacon on the latest live candle (Micro subtle pulse, zero text)
-      if (isLatestCandle && currentPrice !== null) {
-        const curY = getY(currentPrice);
-        ctx.strokeStyle = d.algoSignal === 'LONG' 
-          ? 'rgba(20, 184, 166, 0.45)' 
-          : (d.algoSignal === 'SHORT' ? 'rgba(244, 63, 94, 0.45)' : 'rgba(56, 189, 248, 0.35)');
-        ctx.lineWidth = 1;
-        ctx.beginPath();
-        ctx.arc(x, curY, 6.5, 0, Math.PI * 2);
-        ctx.stroke();
-
-        ctx.fillStyle = d.algoSignal === 'LONG' 
-          ? '#14b8a6' 
-          : (d.algoSignal === 'SHORT' ? '#f43f5e' : '#38bdf8');
-        ctx.beginPath();
-        ctx.arc(x, curY, 2.5, 0, Math.PI * 2);
-        ctx.fill();
-      }
-    });
 
     // 5. Draw Trade Lines, Badges & Indicators (Foreground)
     if (activeTrade && tradeMetrics) {

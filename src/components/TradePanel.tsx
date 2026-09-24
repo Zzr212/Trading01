@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { Trade, AppError } from '../types';
-import { Clock, TrendingUp, TrendingDown, CheckCircle2, XCircle, Play, Trash2, Power, ShieldCheck } from 'lucide-react';
+import { Clock, TrendingUp, TrendingDown, CheckCircle2, XCircle, Play, Trash2, Power } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import SentimentMeter from './SentimentMeter';
 import TradeReplayModal from './TradeReplayModal';
@@ -177,17 +177,9 @@ function formatTime(ts: number) {
 
 function TradeItem({ trade, onReview }: { trade: Trade; onReview?: () => void; key?: string | number }) {
   const isLong = trade.type === 'LONG';
-  const isForex = trade.pair?.includes('EUR') || trade.pair?.includes('GBP');
-  const digits = isForex ? 5 : 2;
-  const currPrefix = isForex ? '' : '$';
   
   const durationMs = trade.closeTimestamp ? (trade.closeTimestamp - trade.timestamp) : null;
   const durationStr = durationMs ? `${Math.round(durationMs / 60000)}m ${Math.round((durationMs % 60000)/1000)}s` : '';
-  
-  const formatVal = (v?: number) => {
-    if (v === undefined || v === null) return '--';
-    return `${currPrefix}${v.toLocaleString(undefined, { minimumFractionDigits: digits, maximumFractionDigits: digits })}`;
-  };
   
   return (
     <motion.div
@@ -224,15 +216,9 @@ function TradeItem({ trade, onReview }: { trade: Trade; onReview?: () => void; k
         <div className="flex items-center gap-3">
           {trade.status === 'ACTIVE' && (
             <div className="flex items-center gap-1.5">
-              {trade.tp1Hit ? (
-                <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 flex items-center gap-1">
-                  <ShieldCheck size={11} /> 100% Risk-Free (BE)
-                </span>
-              ) : (
-                <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-sky-500/10 text-sky-400 border border-sky-500/20">
-                  Dynamic TP / BE Shield
-                </span>
-              )}
+              <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-sky-500/10 text-sky-400 border border-sky-500/20">
+                Fixed SL & Algo TP
+              </span>
               <div className="flex items-center gap-1 text-xs text-orange-400 animate-pulse">
                 <Clock size={12}/> Running
               </div>
@@ -244,10 +230,7 @@ function TradeItem({ trade, onReview }: { trade: Trade; onReview?: () => void; k
                 <CheckCircle2 size={14}/> Won
               </div>
               <span className="text-[9px] text-emerald-400 font-mono">
-                {trade.exitReason === 'TAKE_PROFIT' ? 'Full Target TP Hit' :
-                 trade.exitReason === 'BREAK_EVEN_PROFIT' ? 'Break-Even Win' :
-                 trade.exitReason === 'PROFIT_PRESERVATION' ? 'Locked Profit Exit' :
-                 (trade.exitReason || 'Take Profit')}
+                {trade.exitReason === 'TAKE_PROFIT' ? 'Algo TP Hit' : (trade.exitReason || 'Take Profit')}
               </span>
             </div>
           )}
@@ -257,9 +240,7 @@ function TradeItem({ trade, onReview }: { trade: Trade; onReview?: () => void; k
                 <XCircle size={14}/> Lost
               </div>
               <span className="text-[9px] text-rose-400 font-mono">
-                {trade.exitReason === 'STOP_LOSS' ? 'Stop Loss Hit' :
-                 trade.exitReason === 'TIME_DECAY_SCRATCH' ? 'Time Decay Scratch' :
-                 (trade.exitReason || 'Stop Loss')}
+                {trade.exitReason === 'STOP_LOSS' ? 'Fixed SL Hit' : (trade.exitReason || 'Stop Loss')}
               </span>
             </div>
           )}
@@ -279,15 +260,15 @@ function TradeItem({ trade, onReview }: { trade: Trade; onReview?: () => void; k
       <div className="grid grid-cols-4 gap-2 text-xs font-mono bg-neutral-900/30 p-2 rounded-lg border border-neutral-800/40">
         <div className="flex flex-col">
           <span className="text-[9px] text-neutral-500 font-sans tracking-wide">ENTRY</span>
-          <span className="text-neutral-200">{formatVal(trade.entryPrice)}</span>
+          <span className="text-neutral-200">${trade.entryPrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
         </div>
         <div className="flex flex-col items-center">
           <span className="text-[9px] text-neutral-500 font-sans tracking-wide">ALGO TP</span>
-          <span className="text-emerald-400 font-semibold">{formatVal(trade.takeProfit)}</span>
+          <span className="text-emerald-400 font-semibold">${trade.takeProfit.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
         </div>
         <div className="flex flex-col items-center">
-          <span className="text-[9px] text-neutral-500 font-sans tracking-wide">PROTECT SL</span>
-          <span className="text-rose-400 font-semibold">{formatVal(trade.stopLoss)}</span>
+          <span className="text-[9px] text-neutral-500 font-sans tracking-wide">FIXED SL</span>
+          <span className="text-rose-400 font-semibold">${trade.stopLoss.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
         </div>
         <div className="flex flex-col items-end">
           <span className="text-[9px] text-neutral-500 font-sans tracking-wide">R:R RATIO</span>

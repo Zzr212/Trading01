@@ -2,7 +2,7 @@ import express from "express";
 import path from "path";
 import fs from "fs";
 import { DatabaseSync } from "node:sqlite";
-import rateLimit from "express-rate-limit";
+import { createServer as createViteServer } from "vite";
 import { TradingBot } from './bot';
 import { DEFAULT_MT5_CONFIG, generateMql5EACode, MT5Config, MT5Heartbeat } from './src/mt5_bridge';
 import { startCloudflareTunnel, getTunnelUrl } from './src/tunnel';
@@ -104,17 +104,7 @@ async function startServer() {
       next();
     }
   });
-  // Priority 3.1 & 3.2: 5MB JSON limit & Express rate limiter
-  app.use(express.json({ limit: '5mb' }));
-
-  const apiLimiter = rateLimit({
-    windowMs: 60 * 1000,
-    max: 300, // 300 requests per minute per IP (ample for 1s polling + telemetry)
-    standardHeaders: true,
-    legacyHeaders: false,
-    message: { error: "Too many requests, please slow down." }
-  });
-  app.use("/api/", apiLimiter);
+  app.use(express.json({ limit: '50mb' }));
 
   // System Diagnostics & Health Check
   app.get("/api/system-health", (req, res) => {
@@ -180,25 +170,10 @@ async function startServer() {
   app.post("/api/trades", (req, res) => {
     const t = req.body;
     try {
-      const stmt = db.prepare(`
-        INSERT INTO trades (
-          id, pair, type, entryPrice, takeProfit, stopLoss, tp1Price, tp1Hit, status, timestamp, confidence, aiFeatures
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `);
-      stmt.run(
-        t.id,
-        t.pair,
-        t.type,
-        t.entryPrice,
-        t.takeProfit,
-        t.stopLoss,
-        t.tp1Price || t.takeProfit,
-        t.tp1Hit ? 1 : 0,
-        t.status || 'ACTIVE',
-        t.timestamp || Date.now(),
-        t.confidence || 75,
-        t.aiFeatures ? JSON.stringify(t.aiFeatures) : null
+      const stmt = db.prepare(
+        "INSERT INTO trades VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
       );
+      stmt.run(t.id, t.pair, t.type, t.entryPrice, t.takeProfit, t.stopLoss, t.status, t.timestamp, t.confidence);
       res.json({ success: true });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
@@ -521,34 +496,6 @@ async function startServer() {
   app.post("/api/mt5/heartbeat", handleHeartbeat);
   app.get("/api/mt5/heartbeat", handleHeartbeat);
 
-  // 4b. Vantage MT5 Real-Time Tick Ingestion
-  app.post("/api/mt5/tick", (req, res) => {
-    try {
-      const { symbol, bid, ask } = req.body || {};
-      if (symbol && (bid || ask)) {
-        const b = parseFloat(bid) || parseFloat(ask);
-        const a = parseFloat(ask) || parseFloat(bid);
-        bot.handleMT5Tick(symbol, b, a);
-      }
-      res.json({ success: true, received: true });
-    } catch (err: any) {
-      res.status(400).json({ success: false, error: err.message });
-    }
-  });
-
-  // 4c. Vantage MT5 Real-Time Klines Ingestion (Push candles from MQL5)
-  app.post("/api/mt5/klines", (req, res) => {
-    try {
-      const { symbol, timeframe, klines } = req.body || {};
-      if (symbol && timeframe && Array.isArray(klines)) {
-        bot.handleMT5Klines(symbol, timeframe, klines);
-      }
-      res.json({ success: true, count: Array.isArray(klines) ? klines.length : 0 });
-    } catch (err: any) {
-      res.status(400).json({ success: false, error: err.message });
-    }
-  });
-
   // 5. Download / Fetch Generated MQL5 EA Code
   app.get("/api/mt5/ea-code", (req, res) => {
     try {
@@ -597,7 +544,6 @@ async function startServer() {
 
   // Vite middleware for development
   if (process.env.NODE_ENV !== "production") {
-    const { createServer: createViteServer } = await import("vite");
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: "spa",
@@ -616,15 +562,9 @@ async function startServer() {
 
   app.listen(PORT, "0.0.0.0", () => {
     console.log(`Server running on http://localhost:${PORT}`);
-    // Priority 3.3: Toggleable Cloudflare tunnel via environment variable (default: true)
-    const enableTunnel = process.env.USE_CLOUDFLARE_TUNNEL !== 'false' && process.env.ENABLE_CLOUDFLARE_TUNNEL !== 'false';
-    if (enableTunnel) {
-      startCloudflareTunnel(PORT).catch(err => {
-        console.error("[Server] Tunnel startup error:", err?.message || err);
-      });
-    } else {
-      console.log("[Server] Cloudflare Tunnel disabled via env var (USE_CLOUDFLARE_TUNNEL=false)");
-    }
+    startCloudflareTunnel(PORT).catch(err => {
+      console.error("[Server] Tunnel startup error:", err?.message || err);
+    });
   });
 }
 

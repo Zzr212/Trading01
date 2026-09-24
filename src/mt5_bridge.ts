@@ -81,16 +81,8 @@ input double InpMaxSpreadCrypto    = 500.0;              // Max Spread Kripto (u
 //--- Global Variables
 CTrade         ExtTrade;
 datetime       ExtLastHeartbeat = 0;
-datetime       ExtLastKlinesSent = 0;
 string         ExtActiveTradeIds[];
 string         gServerUrl = "";
-
-// Forward declarations
-void SendHeartbeat();
-void PollSignalsFromServer();
-void ProcessServerOrders(string json);
-void PushKlinesToServer();
-void PushTickToServer();
 
 string CleanServerUrl(string u)
 {
@@ -120,13 +112,11 @@ int OnInit()
    ExtTrade.SetTypeFilling(ORDER_FILLING_IOC);
    
    gServerUrl = CleanServerUrl(InpServerUrl);
-   Print(">>> [AI Trader MT5 Bridge v3.0] Pokrenut. Vantage terminal -> Node.js bot.");
-   Print(">>> Server URL: ", gServerUrl);
-   Print(">>> Proverite da li je u MT5: Tools -> Options -> Expert Advisors -> 'Allow WebRequest' dodat URL: ", gServerUrl);
+   Print(">>> [AI Trader MT5 Bridge v2.3] Pokrenut. Server URL: ", gServerUrl);
+   Print(">>> Proverite da li je u MT5: Tools -> Options -> Expert Advisors -> 'Allow WebRequest' dodat tačan URL: ", gServerUrl);
    
    EventSetTimer(InpTimerSeconds);
    SendHeartbeat();
-   PushKlinesToServer();
    return(INIT_SUCCEEDED);
 }
 
@@ -137,14 +127,6 @@ void OnDeinit(const int reason)
 {
    EventKillTimer();
    Print(">>> [AI Trader MT5 Bridge] Zaustavljen. Reason code: ", reason);
-}
-
-//+------------------------------------------------------------------+
-//| Tick event function - real-time tick streaming                   |
-//+------------------------------------------------------------------+
-void OnTick()
-{
-   PushTickToServer();
 }
 
 //+------------------------------------------------------------------+
@@ -160,15 +142,7 @@ void OnTimer()
       SendHeartbeat();
       ExtLastHeartbeat = TimeCurrent();
    }
-
-   // Pošalji 5m/15m klines svakih 15 sekundi ili na zatvaranju sveće
-   if(TimeCurrent() - ExtLastKlinesSent >= 15)
-   {
-      PushKlinesToServer();
-      ExtLastKlinesSent = TimeCurrent();
-   }
 }
-
 
 //+------------------------------------------------------------------+
 //| HTTP GET helper funkcija                                         |
@@ -520,35 +494,12 @@ void ExecuteOrSyncTrade(string tradeJson)
 
    double normSL = NormalizeDouble(sl, digits);
    double normTP = NormalizeDouble(tp, digits);
-   double tp1    = ExtractJsonDouble(tradeJson, "tp1Price");
-   double tp1Hit = ExtractJsonDouble(tradeJson, "tp1Hit"); // 1 or 0
 
-   // 1. Ako pozicija već postoji: Sinhronizuj Stop Loss (Break-Even / Trailing) i TP1 Delimično zatvaranje
+   // 1. Ako pozicija već postoji: Sinhronizuj Stop Loss (Break-Even / Trailing)
    if(existingTicket > 0)
    {
       double normCurSL = NormalizeDouble(currentPosSL, digits);
       double normCurTP = NormalizeDouble(currentPosTP, digits);
-      double currentVolume = PositionGetDouble(POSITION_VOLUME);
-
-      // TP1 Izvršenje (Option B): Ako je TP1 pogođen na serveru ili cena dosegla TP1, zatvori 50% lota
-      if(tp1Hit > 0.5 && currentVolume >= 0.02)
-      {
-         string comment = PositionGetString(POSITION_COMMENT);
-         if(StringFind(comment, "_TP1") < 0)
-         {
-            double closeLot = NormalizeDouble(currentVolume / 2.0, 2);
-            double minVol = SymbolInfoDouble(symbol, SYMBOL_VOLUME_MIN);
-            double stepVol = SymbolInfoDouble(symbol, SYMBOL_VOLUME_STEP);
-            if(stepVol > 0) closeLot = MathFloor(closeLot / stepVol) * stepVol;
-            if(closeLot >= minVol && closeLot < currentVolume)
-            {
-               if(ExtTrade.PositionClosePartial(existingTicket, closeLot))
-               {
-                  PrintFormat(">>> [TP1 PARTIAL CLOSE 50%%] Pozicija #%d (%s) zatvoreno %.2f lota na TP1.", existingTicket, symbol, closeLot);
-               }
-            }
-         }
-      }
       
       // Proveri da li se SL ili TP promenio
       if(MathAbs(normSL - normCurSL) > 2 * point || (normTP > 0 && MathAbs(normTP - normCurTP) > 2 * point))
@@ -770,85 +721,6 @@ void ExecuteOrSyncTrade(string tradeJson)
       {
          PrintFormat(">>> [MT5 EXECUTION] Prodato %s Lot: %.2f @ %.4f (SL: %.4f, TP: %.4f, Ticket: %d)", 
             symbol, lot, ExtTrade.ResultPrice(), normSL, normTP, ExtTrade.ResultOrder());
-      }
-   }
-}
-
-//+------------------------------------------------------------------+
-//| Slanje real-time tick-a ka Node.js botu                           |
-//+------------------------------------------------------------------+
-void PushTickToServer()
-{
-   string symbolsToSend[] = {"XAUUSD", "EURUSD", "GBPUSD"};
-   string sym = _Symbol;
-   
-   bool isTracked = false;
-   for(int i = 0; i < ArraySize(symbolsToSend); i++)
-   {
-      if(StringFind(sym, symbolsToSend[i]) >= 0)
-      {
-         isTracked = true;
-         sym = symbolsToSend[i];
-         break;
-      }
-   }
-   if(!isTracked) return;
-
-   MqlTick tick;
-   if(!SymbolInfoTick(_Symbol, tick)) return;
-
-   string payload = StringFormat("{\\"symbol\\":\\"%s\\",\\"bid\\":%.5f,\\"ask\\":%.5f}", sym, tick.bid, tick.ask);
-   string resp;
-   HttpPost(gServerUrl + "/api/mt5/tick", payload, resp);
-}
-
-//+------------------------------------------------------------------+
-//| Slanje 5m, 15m i 1h svećica direktno sa Vantage terminala        |
-//+------------------------------------------------------------------+
-void PushKlinesToServer()
-{
-   string basePairs[] = {"XAUUSD", "EURUSD", "GBPUSD"};
-   ENUM_TIMEFRAMES timeframes[] = {PERIOD_M5, PERIOD_M15, PERIOD_H1};
-   string tfNames[] = {"5m", "15m", "1h"};
-
-   for(int p = 0; p < ArraySize(basePairs); p++)
-   {
-      string standardPair = basePairs[p];
-      string brokerSym = ResolveBrokerSymbol(standardPair);
-      
-      for(int t = 0; t < ArraySize(timeframes); t++)
-      {
-         MqlRates rates[];
-         ArraySetAsSeries(rates, true);
-         int count = CopyRates(brokerSym, timeframes[t], 0, 70, rates);
-         if(count <= 0) continue;
-
-         string candlesJson = "[";
-         for(int i = count - 1; i >= 0; i--)
-         {
-            string cStr = StringFormat(
-               "{\\"time\\":%I64d,\\"open\\":%.5f,\\"high\\":%.5f,\\"low\\":%.5f,\\"close\\":%.5f,\\"volume\\":%I64d}",
-               (long)rates[i].time * 1000,
-               rates[i].open,
-               rates[i].high,
-               rates[i].low,
-               rates[i].close,
-               rates[i].tick_volume
-            );
-            candlesJson += cStr;
-            if(i > 0) candlesJson += ",";
-         }
-         candlesJson += "]";
-
-         string payload = StringFormat(
-            "{\\"symbol\\":\\"%s\\",\\"timeframe\\":\\"%s\\",\\"klines\\":%s}",
-            standardPair,
-            tfNames[t],
-            candlesJson
-         );
-
-         string resp;
-         HttpPost(gServerUrl + "/api/mt5/klines", payload, resp);
       }
    }
 }
